@@ -1,0 +1,8 @@
+[90m[main 2025-04-05T22:36:07.535Z][0m updateURL https://api2.cursor.sh/updates/api/update/linux-x64/cursor/0.45.14/48e0812a9cbfa4229f7590ae6e75cdc278351bb83dd94efa41f67295b09d21e6
+[90m[main 2025-04-05T22:36:07.535Z][0m update#setState idle
+[1055866:0406/040610.070342:ERROR:nss_util.cc(345)] After loading Root Certs, loaded==false: NSS error code: -8018
+[90m[main 2025-04-05T22:36:37.537Z][0m update#setState checking for updates
+[90m[main 2025-04-05T22:36:37.859Z][0m update#setState ready
+[90m[main 2025-04-05T22:49:56.787Z][0m Extension host with pid 1056710 exited with code: 0, signal: unknown.
+[90m[main 2025-04-05T22:49:56.910Z][0m Extension host with pid 1056637 exited with code: 0, signal: unknown.
+[91m[main 2025-04-05T22:49:57.097Z][0m [UtilityProcess id: 1, type: fileWatcher, pid: 1056636]: crashed with code 15 and reason 'killed'

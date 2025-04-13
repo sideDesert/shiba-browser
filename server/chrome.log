@@ -1,0 +1,8 @@
+
+DevTools listening on ws://127.0.0.1:9222/devtools/browser/bdf4a8dc-f139-4cf8-aa7c-63084b9bea16
+[756691:756761:0414/024642.098684:ERROR:nss_util.cc(344)] After loading Root Certs, loaded==false: NSS error code: -8018
+[756786:756786:0414/024646.492360:ERROR:gles2_cmd_decoder_passthrough.cc(1081)] [GroupMarkerNotSet(crbug.com/242999)!:A0F01E005C180000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content.
+Created TensorFlow Lite XNNPACK delegate for CPU.
+Attempting to use a delegate that only supports static-sized tensors with a graph that has dynamic-sized tensors (tensor#-1 is a dynamic-sized tensor).
+[756786:756786:0414/025123.839725:ERROR:gles2_cmd_decoder_passthrough.cc(1081)] [GroupMarkerNotSet(crbug.com/242999)!:A0501F005C180000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content.
+[756786:756786:0414/025716.045130:ERROR:gles2_cmd_decoder_passthrough.cc(1081)] [GroupMarkerNotSet(crbug.com/242999)!:A0F01E005C180000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content.
