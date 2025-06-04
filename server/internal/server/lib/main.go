@@ -166,3 +166,12 @@ func StartBrowser(initUrl string) (*exec.Cmd, error) {
 	return cmd, nil
 
 }
+
+const (
+	Key = iota
+	CursorMove
+	CursorClick
+	Undefined
+)
+
+const CURSOR_Value_REGEX = `^\((\d+(?:\.\d+)?),(\d+(?:\.\d+)?)\)$`

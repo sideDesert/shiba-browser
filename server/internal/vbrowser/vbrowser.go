@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 
@@ -29,6 +30,8 @@ type VbrowserManager struct {
 	UdpAudioPort int
 	Ready        chan Step
 	ConnReady    chan Step
+	Cursor       Cursor
+	Keyboard     Keyboard
 
 	pid        int
 	defaultUrl string
@@ -40,6 +43,8 @@ func NewManager(port int) *VbrowserManager {
 		Ready:        make(chan Step, 5),
 		ConnReady:    make(chan Step, 5),
 		defaultUrl:   "https://www.youtube.com/watch?v=OPK14FrnjO0&ab_channel=JackHarlow",
+		Cursor:       NewCursor(0, 0),
+		Keyboard:     Keyboard{},
 		UdpVideoPort: 5005,
 		UdpAudioPort: 5006,
 	}
@@ -115,6 +120,30 @@ func (m *VbrowserManager) SetupPipeline() error {
 	return nil
 }
 
-/**
-* This was supposed to be used to stream the video using the webrtcbin directly - There were issues so I switched to udp streams
-* */
+func (m *Cursor) Move(x float32, y float32) error {
+	m.X = x
+	m.Y = y
+	cmdstr := fmt.Sprintf("DISPLAY :99 xdotool mousemove %f %f", x, y)
+	cmd := exec.Command(cmdstr)
+	return cmd.Run()
+}
+
+func (m *Cursor) Click() error {
+	// Execute a click
+	cmdstr := "DISPLAY :99 xdotool click 1"
+	cmd := exec.Command(cmdstr)
+	return cmd.Run()
+}
+
+func (k *Keyboard) SendKeys(keys string) error {
+	// Do some of that xdotools stuff
+	parsed := parseKey(keys)
+	cmdstr := fmt.Sprintf("DISPLAY :99 xdotool key %s", parsed)
+	cmd := exec.Command(cmdstr)
+
+	return cmd.Run()
+}
+
+func parseKey(key string) string {
+	return key
+}

@@ -1,12 +1,15 @@
 package vbrowser
 
-type MousePosition struct {
-	X int
-	Y int
+type Cursor struct {
+	X float32
+	Y float32
 }
 
-func Pos(x int, y int) MousePosition {
-	return MousePosition{
+type Keyboard struct {
+}
+
+func NewCursor(x float32, y float32) Cursor {
+	return Cursor{
 		X: x,
 		Y: y,
 	}

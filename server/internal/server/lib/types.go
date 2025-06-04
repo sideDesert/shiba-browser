@@ -3,6 +3,7 @@ package lib
 import (
 	"log"
 
+	"github.com/nats-io/nats.go"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -18,9 +19,10 @@ type StreamConfig struct {
 }
 
 type ConnMap struct {
-	UserId       string        `json:"user_id"`
-	StreamConfig *StreamConfig `json:"stream_config"`
-	Chatrooms    []Chatroom    `json:"chatrooms"`
+	UserId        string        `json:"user_id"`
+	StreamConfig  *StreamConfig `json:"stream_config"`
+	Chatrooms     []Chatroom    `json:"chatrooms"`
+	Subscriptions []*nats.Subscription
 }
 
 func NewConnMap(userId string) (*ConnMap, error) {

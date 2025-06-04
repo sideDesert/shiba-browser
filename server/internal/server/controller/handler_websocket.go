@@ -35,7 +35,7 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 	// Fetch user chat rooms
 	chatrooms, err := c.s.GetUserChatRooms(userId)
 	if err != nil {
-		log.Println("Error in handleChatWebsocket[GetUserChatRooms]:", err)
+		log.Println("🚨Error in handleChatWebsocket[GetUserChatRooms]:", err)
 		return err
 	}
 
@@ -48,16 +48,17 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("Error in handleChatWebsocket[upgrader]:", err)
+		log.Println("🚨Error in handleChatWebsocket[upgrader]:", err)
 		return err
 	}
 
 	// Store client connection - this creates the peer connection as well
 	connsVal, err := lib.NewConnMap(userId)
 	if err != nil {
-		log.Println("Error in handleChatWebsocket[upgrader]", err)
+		log.Println("🚨Error in handleChatWebsocket[upgrader]", err)
+	} else {
+		c.conns[conn] = connsVal
 	}
-	c.conns[conn] = connsVal
 
 	userTag := strings.Split(userId, "-")[0]
 	log.Println("✅ Established WebSocket connection with", userTag)
@@ -67,29 +68,32 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 		log.Println("🚀 Starting cleanup for", userTag)
 
 		c.mu.Lock()
-		delete(c.conns, conn)
+		connVal, ok := c.conns[conn]
+		if ok {
+			for _, sub := range connVal.Subscriptions {
+				sub.Unsubscribe()
+			}
+			connVal.StreamConfig.PeerConnection.Close()
+			delete(c.conns, conn)
+		}
 		c.mu.Unlock()
 
 		conn.Close()
-		log.Println("❌ Connection closed with", userTag)
+		log.Println("❗Connection closed with", userTag)
 	}()
-
-	if err != nil {
-		log.Println("❌ Error creating participant:", err)
-		return fmt.Errorf("Error creating participant")
-	}
 
 	log.Println("🫂 Total active connections:", len(c.conns))
 
 	// Subscribe to chat rooms
+	currentConn := c.conns[conn]
 	for _, room := range chatrooms {
 		chatroomId := room.Id
-		_, err := c.nats.Subscribe("chatrooms."+chatroomId, func(msg *nats.Msg) {
+		sub, err := c.nats.Subscribe("chatrooms."+chatroomId, func(msg *nats.Msg) {
 			log.Println("Received Message:", string(msg.Data))
 			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
 
 			if err != nil {
-				log.Println("❌ Error writing WebSocket message:", err)
+				log.Println("🚨 Error writing WebSocket message:", err)
 				// Remove connection from cache safely
 				c.mu.Lock()
 				delete(c.conns, conn)
@@ -99,16 +103,16 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 				return
 			}
 		})
-
 		if err != nil {
-			log.Println("❌ Error subscribing to NATS[chatrooms.*]:", err)
+			log.Println("🚨 Error subscribing to NATS[chatrooms.*]:", err)
 			continue
 		}
+		currentConn.Subscriptions = append(currentConn.Subscriptions, sub)
 
-		_, err = c.nats.Subscribe("webrtc.*."+chatroomId, func(msg *nats.Msg) {
+		sub, err = c.nats.Subscribe("webrtc.*."+chatroomId, func(msg *nats.Msg) {
 			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
 			if err != nil {
-				log.Println("❌ Error writing WebSocket Webrtc Message:", err)
+				log.Println("🚨 Error writing WebSocket Webrtc Message:", err)
 				// Remove connection from cache safely
 				c.mu.Lock()
 				delete(c.conns, conn)
@@ -119,26 +123,30 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			}
 		})
 		if err != nil {
-			log.Println("❌ Error subscribing to NATS[webrtc.*]:", err)
+			log.Println("🚨 Error subscribing to NATS[webrtc.*]:", err)
 			continue
 		}
+		currentConn.Subscriptions = append(currentConn.Subscriptions, sub)
 	}
 
 	// Listen for messages
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			log.Println("❌ Client disconnected or read error:", err)
-			break
+			log.Println("🚨 Client disconnected or read error:", err)
+			continue
 		}
 
 		// Parse message
 		var initMsgObj dto.Message[any]
 		err = json.Unmarshal(msg, &initMsgObj)
+		if err != nil {
+			log.Println("🚨Error[json.Unmarshal(initMsgObj)]:", err)
+		}
 		fmt.Println("📥 Received:", string(initMsgObj.Subject))
 
 		if err != nil {
-			log.Println("Error Unmarshalling initMsgObj: ", err)
+			log.Println("🚨Error Unmarshalling initMsgObj: ", err)
 		}
 
 		if strings.HasPrefix(initMsgObj.Subject, "chat") {
@@ -146,24 +154,25 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			s := strings.Split(initMsgObj.Subject, ".")
 
 			if len(s) < 2 {
-				log.Println("❌ Error chat message is not correct format, got:", string(msg))
+				log.Println("🚨 Error chat message is not correct format, got:", string(msg))
+				continue
 			}
 
 			chatroomId := s[1]
 			json.Unmarshal(msg, &msgObj)
 
 			if !ok {
-				log.Println("❌ Failed to assert Payload as dto.ChatMessagePayload")
+				log.Println("🚨 Failed to assert Payload as dto.ChatMessagePayload")
 				log.Println("Payload", string(msg))
-				return fmt.Errorf("invalid payload type")
+				continue
 			}
 
 			c.nats.Publish("chatrooms."+chatroomId, msg)
 
 			// Store message
 			if err := c.s.StoreChatMessage(initMsgObj.Sender, chatroomId, msgObj.Payload); err != nil {
-				log.Println("❌ Error storing chat message:", err)
-				break
+				log.Println("🚨 Error storing chat message:", err)
+				continue
 			}
 		}
 
@@ -172,7 +181,7 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			s := strings.Split(initMsgObj.Subject, ".")
 			if len(s) != 3 {
 				log.Println("❌ Error in msg[webrtc] type:")
-				break
+				continue
 			}
 			chatroomId := s[2]
 			c.nats.Publish("chatrooms."+chatroomId, msg)
@@ -186,7 +195,7 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			sp := strings.Split(initMsgObj.Subject, ".")
 			if len(sp) != 3 {
 				log.Println("❌ Error in msg[subject] length:(not 3)")
-				break
+				continue
 			}
 			msgType := sp[1]
 			chatroomId := sp[2]
@@ -194,35 +203,40 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			if userId == "" {
 				log.Println("🔴 No senderId provided in message")
 				log.Println("Sender", string(msg))
-				break
+				continue
 			}
 
 			if msgType == "answer" {
 				payloadMap, ok := initMsgObj.Payload.(map[string]any)
 				if !ok {
 					log.Println("🔴 Payload is not a valid map[string]interface{}")
-					break
+					continue
 				}
 
 				jsonBytes, err := json.Marshal(payloadMap)
 				if err != nil {
 					log.Println("🔴 Failed to marshal payload map to JSON:", err)
-					break
+					continue
 				}
 
 				var desc webrtc.SessionDescription
 				err = json.Unmarshal(jsonBytes, &desc)
 				if err != nil {
 					log.Println("🔴Failed to unmarshal JSON to SessionDescription:", err)
-					break
+					continue
 				}
 
 				c.mu.Lock()
-				err = c.conns[conn].StreamConfig.PeerConnection.SetRemoteDescription(desc)
+				connVal, ok := c.conns[conn]
 				c.mu.Unlock()
+				if !ok {
+					log.Println("🔴Error: reding connVal c.conns[conn]:")
+					continue
+				}
+				err = connVal.StreamConfig.PeerConnection.SetRemoteDescription(desc)
 				if err != nil {
 					log.Println("🔴Error setting remote description:", err)
-					break
+					continue
 				}
 				log.Println("✅ Remote description set for", userId, ":", chatroomId)
 				log.Println("🔥 Webrtc Connection Established with", userId, ":", chatroomId)
@@ -231,20 +245,20 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 				payloadMap, ok := initMsgObj.Payload.(map[string]any)
 				if !ok {
 					log.Println("Ice Candidate payload is not of type map[string]any")
-					break
+					continue
 				}
 
 				jsonBytes, err := json.Marshal(payloadMap)
 				if err != nil {
 					log.Println("🔴 Failed to marshal payload map to JSON:", err)
-					break
+					continue
 				}
 
 				var _candidate webrtc.ICECandidateInit
 				err = json.Unmarshal(jsonBytes, &_candidate)
 				if err != nil {
 					log.Println("🔴Failed to unmarshal JSON to ICECandidateInit:", err)
-					break
+					continue
 				}
 
 				c.mu.Lock()
@@ -255,10 +269,68 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 
 			if msgType == "disconnected" {
 				log.Println("⭕User", userId, "disconnected from", chatroomId)
-				c.mu.Lock()
-				c.conns[conn].StreamConfig.PeerConnection.Close()
-				delete(c.conns, conn)
-				c.mu.Unlock()
+				break
+			}
+
+			if msgType == "remote" {
+				log.Println("🕹️Remote", chatroomId)
+				payload, ok := initMsgObj.Payload.(dto.RemoteMessagePayload)
+				if !ok {
+					log.Println("🚨Error[msgType:remote]:", err)
+					continue
+				}
+
+				payloadType, ok := payload.ValidateRemotePayload()
+				if !ok {
+					log.Println("🚨Error[payloadTypeValidation:remote]: payload form not valid")
+					continue
+				}
+
+				if payloadType == lib.CursorClick || payloadType == lib.CursorMove {
+					x, y, err := payload.ExtractCursorPos(payloadType)
+					if err != nil {
+						log.Println("🚨Error[Cursor:payload]: Couldn't extract payload")
+						continue
+					}
+
+					if payloadType == lib.CursorClick {
+						err := c.browserManager.Cursor.Move(x, y)
+						if err != nil {
+							log.Println("🚨Error[CursorClick.Move]:", err)
+							continue
+						}
+						err = c.browserManager.Cursor.Click()
+						if err != nil {
+							log.Println("Error[CursorClick.Click]:", err)
+							continue
+						}
+					}
+
+					if payloadType == lib.CursorMove {
+						err = c.browserManager.Cursor.Move(x, y)
+						if err != nil {
+							log.Println("🚨Error[CursorMove.Move]:", err)
+							continue
+						}
+					}
+				}
+
+				if payloadType == lib.Key {
+					keys, err := payload.ExtractKeys(payloadType)
+					if err != nil {
+						log.Println("🚨Error[Key:payload]: Couldn't extract payload")
+						continue
+					}
+
+					err = c.browserManager.Keyboard.SendKeys(keys)
+					if err != nil {
+						log.Println("🚨Error[Keys]:", err)
+						continue
+					}
+				}
+				if payloadType == lib.Undefined {
+					return nil
+				}
 			}
 
 			if msgType == "stop-stream" {
@@ -267,24 +339,25 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 				err := c.browserManager.Pipeline.SetState(gst.StateNull)
 				if err != nil {
 					log.Println("Error stopping stream[Pipeline.SetState(gst.StateNull)]", err)
-					return err
 				}
 
 				userIds, err := c.s.Store.GetUsersByChatroomId(c.s.Ctx, chatroomId)
 				if err != nil {
 					log.Println("Error getting users by chatroom id:", err)
-					return err
 				}
 
+				c.mu.Lock()
 				for _, conn := range c.conns {
 					if lib.Contains(userIds, conn.UserId) {
 						conn.StreamConfig.PeerConnection.Close()
 					}
 				}
+				c.mu.Unlock()
 
 				c.chatroomCtx[chatroomId].cancel()
 				delete(c.chatroomCtx, chatroomId)
 				log.Println("⛔👍Stream Ended")
+				break
 			}
 		}
 	}

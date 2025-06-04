@@ -1,15 +1,16 @@
-import { useState, useEffect, useRef, type RefObject } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, type RefObject, useMemo } from "react";
 import { Button } from "./ui/button";
 import { LoaderCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { forwardRef } from "react";
+import { Switch } from "./ui/switch";
 
 export function useMouse() {
-  const [mouse, setMouse] = useState({ x: 0, y: 0 });
+  const mouse = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
-      setMouse({ x: event.clientX, y: event.clientY });
+      mouse.current = { x: event.clientX, y: event.clientY };
     };
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -20,11 +21,15 @@ export function useMouse() {
 }
 
 export function useKeys() {
-  const [key, setKey] = useState("");
+  const key = useRef("");
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      setKey(event.key);
+      let _key = event.key;
+      if (event.ctrlKey) {
+        _key = "ctrl + " + event.key;
+      }
+      key.current = _key;
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -55,12 +60,43 @@ type InteractivityPadProps = {
   handleStartStream: () => void;
   handleStopStream: () => void;
   responseIsLoading: boolean;
-  streamConnectionStatus: string,
+  streamConnectionStatus: string;
   response: object;
   userId: string;
   chatroomId: string;
   hasRemote: boolean;
 };
+
+function getActualVideoSize(elementWidth: number, elementHeight: number) {
+
+  const naturalWidth = 1920
+  const naturalHeight = 1080
+
+  const naturalRatio = naturalWidth / naturalHeight;
+  const elementRatio = elementWidth / elementHeight;
+
+  let actualWidth, actualHeight;
+
+  if (naturalRatio > elementRatio) {
+    // Video is wider - limited by width
+    actualWidth = elementWidth;
+    actualHeight = elementWidth / naturalRatio;
+  } else {
+    // Video is taller - limited by height
+    actualHeight = elementHeight;
+    actualWidth = elementHeight * naturalRatio;
+  }
+
+  return {
+    width: actualWidth,
+    height: actualHeight,
+    naturalWidth,
+    naturalHeight,
+    elementWidth,
+    elementHeight,
+  };
+
+}
 
 export const InteractivityPad = forwardRef<
   HTMLDivElement,
@@ -78,57 +114,54 @@ export const InteractivityPad = forwardRef<
     },
     ref
   ) => {
-
     const [showButton, setShowButton] = useState(true);
     const [startStream, setStreamLoading] = useState<boolean | null>(null);
+    const [sendKeys, setSendKeys] = useState(true);
     const qc = useQueryClient();
-
 
     let buttonText;
     if (startStream === null) {
-      buttonText = "Start Shiba Instance"
+      buttonText = "Start Shiba Instance";
     } else {
-      if (startStream && (streamConnectionStatus === "connecting" || responseIsLoading)) {
-        buttonText = <>
-          <LoaderCircle className="animate-spin" />
-          Loading Stream...
-        </>
+      if (
+        startStream &&
+        (streamConnectionStatus === "connecting" || responseIsLoading)
+      ) {
+        buttonText = (
+          <>
+            <LoaderCircle className="animate-spin" />
+            Loading Stream...
+          </>
+        );
       }
       if (startStream && streamConnectionStatus === "connected") {
-        buttonText = "Live Streaming ON!"
+        buttonText = "Live Streaming ON!";
       }
     }
-
-
 
     const mouse = useMouse();
     const lastPressedKey = useKeys();
     const mouseClick = useMouseClick(ref as RefObject<HTMLDivElement>);
 
-    function getRelativeMouse() {
-      const current = (ref as RefObject<HTMLDivElement>).current;
-      if (!current) {
-        return { x: mouse.x, y: mouse.y };
-      }
-
-      const rect = current.getBoundingClientRect();
-      return {
-        x: Math.min(Math.max(0, mouse.x - rect.left), rect.width),
-        y: Math.min(Math.max(0, mouse.y - rect.top), rect.height),
-      };
-    }
-
-    console.log("Rerendered!!", streamConnectionStatus)
+    console.log("Rerendered!!", streamConnectionStatus);
 
     return (
       <div
-        className="h-full w-full relative flex justify-center items-center"
+        style={{
+          cursor: !showButton ? "none" : "auto",
+        }}
+        className=" h-full w-full relative flex justify-center items-center"
         ref={ref}
       >
         <>
           <Button
             style={{
-              display: streamConnectionStatus === "connected" ? "none" : showButton ? "flex" : "none",
+              display:
+                streamConnectionStatus === "connected"
+                  ? "none"
+                  : showButton
+                    ? "flex"
+                    : "none",
             }}
             disabled={!hasRemote}
             onClick={async () => {
@@ -150,13 +183,19 @@ export const InteractivityPad = forwardRef<
 
           <video
             style={{
-              display: streamConnectionStatus === "connected" ? "block" : showButton ? "none" : "block",
+              display:
+                streamConnectionStatus === "connected"
+                  ? "block"
+                  : showButton
+                    ? "none"
+                    : "block",
             }}
             className="border h-full w-full"
             id="video"
             autoPlay
             playsInline
           />
+
           <Button
             style={{
               display: !showButton ? "block" : "none",
@@ -171,8 +210,145 @@ export const InteractivityPad = forwardRef<
           >
             Stop Virtual Browser
           </Button>
+
+          <div
+            className="absolute items-center justify2center bottom-4 left-4 gap-2 bg-blue-100 px-3 py-2 rounded-md"
+            style={{
+              display: !showButton ? "flex" : "none",
+            }}
+          >
+            <Switch
+              className="inline-block bg-pink-100"
+              checked={sendKeys}
+              onClick={() => {
+                setSendKeys(!sendKeys);
+              }}
+            />
+            <span className="text-blue-500 text-sm">Keyboard mode</span>
+          </div>
         </>
+        <CursorPositionTag />
       </div>
     );
   }
 );
+
+function getBoundedCursorPos(
+  x: number,
+  y: number,
+  left: number,
+  right: number,
+  top: number,
+  bottom: number
+) {
+  let adjx = x;
+  let adjy = y;
+
+  if (x < left) {
+    adjx = left;
+  }
+
+  if (x > right) {
+    adjx = right;
+  }
+
+  if (y < top) {
+    adjy = top;
+  }
+
+  if (y > bottom) {
+    adjy = bottom;
+  }
+
+  return [adjx, adjy];
+}
+
+function CursorPositionTag() {
+  const tagRef = useRef<HTMLDivElement | null>(null);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [videoStuff, setVideoStuff] = useState<ReturnType<typeof getActualVideoSize> | null>(null);
+
+  useLayoutEffect(() => {
+    const tag = tagRef.current;
+    if (!tag) return;
+
+    const parent = tag.parentElement;
+    if (!parent) return;
+
+    const updateSize = () => {
+      const rect = parent.getBoundingClientRect();
+      const size = getActualVideoSize(rect.width, rect.height);
+      setVideoStuff(size);
+    };
+
+    updateSize(); // initial size
+
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(parent);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!tagRef.current) return;
+    const rect = tagRef.current.getBoundingClientRect();
+    setOffset({ x: rect.width / 2, y: rect.height / 2 });
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!tagRef.current) return;
+
+      const parent = tagRef.current.parentElement;
+      if (!parent) return;
+
+      const rect = parent.getBoundingClientRect();
+
+      let top = rect.top;
+      let bottom = rect.bottom;
+      let left = rect.left;
+      let right = rect.right;
+
+      if (videoStuff) {
+        const edge = (rect.height - videoStuff.height) / 2;
+        top += edge;
+        bottom -= edge;
+      }
+
+      const [x, y] = getBoundedCursorPos(event.clientX, event.clientY, left, right, top, bottom);
+
+      tagRef.current.style.left = `${x}px`;
+      tagRef.current.style.top = `${y}px`;
+      tagRef.current.children[0].textContent = `${scale(Math.max(0, x - left), 1920, videoStuff ? videoStuff.width : 0).toFixed(0)},`;
+      tagRef.current.children[1].textContent = `${scale(Math.max(0, y - top), 1080, videoStuff ? videoStuff.height : 0).toFixed(0)}`;
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, [videoStuff]);
+
+  return (
+    <div
+      ref={tagRef}
+      id="pos-tag"
+      style={{
+        position: "fixed",
+        left: 100,
+        top: 100,
+        pointerEvents: "none",
+      }}
+      className="absolute flex"
+    >
+      <div className="text-xs bg-pink-600 text-white px-1.5 py-0.5 rounded-l-sm relative rounded-tl-none">
+        0.0,
+      </div>
+      <div className="text-xs bg-pink-600 text-white px-1.5 pl-0 py-0.5 rounded-r-sm relative">
+        0.0
+      </div>
+    </div>
+  );
+}
+
+function scale(x: number, R: number, X: number) {
+  return (R / X) * x
+}

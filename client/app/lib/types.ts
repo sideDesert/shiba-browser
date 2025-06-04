@@ -35,6 +35,45 @@ export type ChatMessagePayload = {
   created_at: string;
 };
 
+export type RemoteMessagePayload = {
+  type: string
+  value: string
+}
+
+export function NewKeysRemotePayload(key: string) {
+  return {
+    type: "key",
+    value: key
+  } as RemoteMessagePayload
+}
+
+enum CursorValue {
+  LeftClick,
+  RightClick,
+  Move,
+}
+
+export function NewCursorPayload(x: number, y: number, click: CursorValue) {
+  let type = "cursor.move"
+  if (click == CursorValue.LeftClick) {
+    type = "cursor.left_click"
+  }
+
+  if (click == CursorValue.RightClick) {
+    type = "cursor.right_click"
+  }
+
+  if (click == CursorValue.Move) {
+    type = "cursor.move"
+  }
+
+  return {
+    type,
+    value: `(${x},${y})`
+  }
+}
+
+
 export const UserSchema = z.object({
   user_id: z.string(),
   name: z.string(),

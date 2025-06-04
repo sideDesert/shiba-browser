@@ -18,7 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { NewWsChatMessage, NewWebrtcMessage } from "@/lib/chat";
 
-export function meta({ }: Route.MetaArgs) {
+export function meta({}: Route.MetaArgs) {
   return [
     { title: "Chatroom" },
     { name: "description", content: "Welcome to Shiba Chatroom!" },
@@ -40,10 +40,11 @@ export default function Page() {
   const [remoteQFn, remoteQK] = DAL["remote"]["get"];
   const userId = userData?.user_id;
   const [showH1, setShowH1] = useState<boolean>(true);
-  const [streamConnectionStatus, setStreamConnectionStatus] = useState("disconnected")
+  const [streamConnectionStatus, setStreamConnectionStatus] =
+    useState("disconnected");
 
   const vbrowserStream = useRef<MediaStream | null>(null);
-  const vref = useRef<HTMLDivElement | undefined>(undefined);
+  const vref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -92,8 +93,8 @@ export default function Page() {
     useState<MediaStream | null>();
 
   // FOR VBROWSER STREAMING
-  const [startVirtualBrowser, setStartVirtualBrowser] =
-    useState<boolean>(false);
+  // const [startVirtualBrowser, setStartVirtualBrowser] =
+  //   useState<boolean>(false);
   const { data: streamResponse, isLoading: streamResponseIsLoading } = useQuery(
     {
       queryFn: () => get("stream?cid=" + chatroomId),
@@ -327,7 +328,7 @@ export default function Page() {
 
         if (_uid !== userData?.user_id) {
           console.error("Invalid user ID From Server");
-          console.log(msg)
+          console.log(msg);
           return;
         }
 
@@ -387,22 +388,30 @@ export default function Page() {
           };
 
           streamPeerConnection.current.onconnectionstatechange = () => {
-            console.log("Connection STATUS: ", streamPeerConnection.current?.connectionState)
-            setStreamConnectionStatus(streamPeerConnection.current?.connectionState ?? "disconnected")
+            console.log(
+              "Connection STATUS: ",
+              streamPeerConnection.current?.connectionState
+            );
+            setStreamConnectionStatus(
+              streamPeerConnection.current?.connectionState ?? "disconnected"
+            );
             if (streamPeerConnection.current?.connectionState === "connected") {
-              const video = vref.current?.querySelector("video")
+              const video = vref.current?.querySelector("video");
 
               if (!video) {
-                console.error("no video element in vref")
-                return
+                console.error("no video element in vref");
+                return;
               }
 
               video.srcObject = new MediaStream(
-                streamPeerConnection.current?.getReceivers().map(r => r.track).filter(Boolean)
+                streamPeerConnection.current
+                  ?.getReceivers()
+                  .map((r) => r.track)
+                  .filter(Boolean)
               );
-              setShowH1(false)
+              setShowH1(false);
             }
-          }
+          };
 
           const ans = await streamPeerConnection.current?.createAnswer();
           console.log("Created Answer to offer for Stream Peer Connection");
@@ -410,7 +419,7 @@ export default function Page() {
           await streamPeerConnection.current?.setLocalDescription(ans);
           console.log("Set Answer as Local Description");
 
-          console.log("Peer Connection Handler", streamPeerConnection)
+          console.log("Peer Connection Handler", streamPeerConnection);
 
           socket.current?.send(
             JSON.stringify({
@@ -555,8 +564,9 @@ export default function Page() {
       <div className="relative w-full border-black flex grow-1">
         <div className="w-[80%]">
           <div
-            className={`h-full block border ${showH1 ? "border-gray-300" : "border-blue-500"
-              }`}
+            className={`h-full block border ${
+              showH1 ? "border-gray-300" : "border-blue-500"
+            }`}
           >
             {userData?.user_id && (
               <InteractivityPad
@@ -576,14 +586,14 @@ export default function Page() {
                       payload: "",
                     })
                   );
-                  setStartVirtualBrowser(false);
+                  // setStartVirtualBrowser(false);
                 }}
                 responseIsLoading={streamResponseIsLoading}
                 response={streamResponse}
                 chatroomId={chatroomId}
                 streamConnectionStatus={streamConnectionStatus}
                 ref={vref}
-                browserStream={vbrowserStream}
+                // browserStream={vbrowserStream}
                 userId={userData?.user_id ?? ""}
                 hasRemote={IHaveRemote()}
               />

@@ -87,6 +87,10 @@ func (s *Service) GetOAuthUserData(token *oauth2.Token) (*dto.OAuthGoogleUserDat
 	client := s.oauthConfig.Client(s.Ctx, token)
 
 	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+	if err != nil {
+		log.Println("Error in GetOAuthUserData:", err)
+		return nil, err
+	}
 	defer resp.Body.Close()
 
 	userDataResponse := dto.OAuthGoogleUserDataResponse{}
