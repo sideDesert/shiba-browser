@@ -1,9 +1,26 @@
 
-DevTools listening on ws://127.0.0.1:9222/devtools/browser/f86b1b09-7d01-49f5-a7c0-3b10d83c1753
-[654946:655011:0604/195315.553901:ERROR:nss_util.cc(344)] After loading Root Certs, loaded==false: NSS error code: -8018
-[655036:655036:0604/195317.605021:ERROR:gles2_cmd_decoder_passthrough.cc(1081)] [GroupMarkerNotSet(crbug.com/242999)!:A0F01E00F42C0000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content.
-[654946:654946:0604/195324.326752:ERROR:fm_registration_token_uploader.cc(179)] Client is missing for kUser scope
+DevTools listening on ws://127.0.0.1:9222/devtools/browser/3c6923df-5bd5-4b6a-bc5e-11dbef90864a
+[779812:779885:0604/213725.722235:ERROR:nss_util.cc(344)] After loading Root Certs, loaded==false: NSS error code: -8018
+[779912:779912:0604/213729.598948:ERROR:gles2_cmd_decoder_passthrough.cc(1081)] [GroupMarkerNotSet(crbug.com/242999)!:A0F01E00BC180000]Automatic fallback to software WebGL has been deprecated. Please use the --enable-unsafe-swiftshader flag to opt in to lower security guarantees for trusted content.
+[779812:779812:0604/213744.434772:ERROR:fm_registration_token_uploader.cc(179)] Client is missing for kUser scope
 Created TensorFlow Lite XNNPACK delegate for CPU.
 Attempting to use a delegate that only supports static-sized tensors with a graph that has dynamic-sized tensors (tensor#-1 is a dynamic-sized tensor).
-[654946:655016:0604/195324.483933:ERROR:registration_request.cc(291)] Registration response error message: DEPRECATED_ENDPOINT
-[654946:655016:0604/195352.153088:ERROR:registration_request.cc(291)] Registration response error message: DEPRECATED_ENDPOINT
+[779812:779888:0604/213744.629744:ERROR:registration_request.cc(291)] Registration response error message: DEPRECATED_ENDPOINT
+[779812:779888:0604/213811.961659:ERROR:registration_request.cc(291)] Registration response error message: DEPRECATED_ENDPOINT
+[779912:780089:0604/213830.572036:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213830.613321:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213830.652099:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.156748:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.199562:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.256491:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.310012:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.369915:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.431678:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.500160:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.566325:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.640148:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.699894:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.766463:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.840002:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779912:780089:0604/213832.906575:ERROR:shared_image_manager.cc(509)] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.
+[779812:779888:0604/213853.179009:ERROR:registration_request.cc(291)] Registration response error message: DEPRECATED_ENDPOINT

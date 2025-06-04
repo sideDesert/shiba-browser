@@ -18,7 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { NewWsChatMessage, NewWebrtcMessage } from "@/lib/chat";
 
-export function meta({}: Route.MetaArgs) {
+export function meta({ }: Route.MetaArgs) {
   return [
     { title: "Chatroom" },
     { name: "description", content: "Welcome to Shiba Chatroom!" },
@@ -36,9 +36,9 @@ export default function Page() {
   // const [socket, setSocket] = useState<WebSocket | null>(null);
   const socket = useRef<WebSocket | null>(null);
   const [userData, userDataIsLoading] = useDAL<User>(DAL["auth"]);
+  const userId = userData?.user_id;
   const [chatHistoryFn, chatHistoryKey] = DAL["chatroom"]["history"];
   const [remoteQFn, remoteQK] = DAL["remote"]["get"];
-  const userId = userData?.user_id;
   const [showH1, setShowH1] = useState<boolean>(true);
   const [streamConnectionStatus, setStreamConnectionStatus] =
     useState("disconnected");
@@ -141,6 +141,7 @@ export default function Page() {
     setLocalVideoStream(null);
     localVideoRef.current!.srcObject = null;
   }
+
   function endCall() {
     closeLocalVideoStream();
     closeRemoteVideoStream();
@@ -564,12 +565,13 @@ export default function Page() {
       <div className="relative w-full border-black flex grow-1">
         <div className="w-[80%]">
           <div
-            className={`h-full block border ${
-              showH1 ? "border-gray-300" : "border-blue-500"
-            }`}
+            className={`h-full block border ${showH1 ? "border-gray-300" : "border-blue-500"
+              }`}
           >
             {userData?.user_id && (
               <InteractivityPad
+                userId={userId ?? ""}
+                chatroomId={chatroomId}
                 socket={socket.current}
                 handleStartStream={async () => {
                   setShowH1(false);
@@ -590,11 +592,9 @@ export default function Page() {
                 }}
                 responseIsLoading={streamResponseIsLoading}
                 response={streamResponse}
-                chatroomId={chatroomId}
                 streamConnectionStatus={streamConnectionStatus}
                 ref={vref}
                 // browserStream={vbrowserStream}
-                userId={userData?.user_id ?? ""}
                 hasRemote={IHaveRemote()}
               />
             )}

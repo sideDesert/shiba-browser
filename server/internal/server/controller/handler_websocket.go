@@ -274,9 +274,22 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 
 			if msgType == "remote" {
 				log.Println("🕹️Remote", chatroomId)
-				payload, ok := initMsgObj.Payload.(dto.RemoteMessagePayload)
+				payloadMap, ok := initMsgObj.Payload.(map[string]interface{})
 				if !ok {
-					log.Println("🚨Error[msgType:remote]:", err)
+					log.Println("❌ Payload is not a map")
+					continue
+				}
+
+				payloadBytes, err := json.Marshal(payloadMap)
+				if err != nil {
+					log.Println("❌ Failed to marshal payload:", err)
+					continue
+				}
+
+				var payload dto.RemoteMessagePayload
+				err = json.Unmarshal(payloadBytes, &payload)
+				if err != nil {
+					log.Println("❌ Failed to unmarshal into RemoteMessagePayload:", err)
 					continue
 				}
 

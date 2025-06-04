@@ -90,7 +90,7 @@ func (payload *RemoteMessagePayload) ValidateRemotePayload() (int, bool) {
 		return lib.CursorMove, true
 	}
 
-	if payload.Type == "cursor.click" {
+	if payload.Type == "cursor.left_click" || payload.Type == "cursor.right_click" {
 		if !re.MatchString(payload.Value) {
 			log.Println("🚨Error in ValidateRemotePayload[cursor.click.Regex]: Not of form (x,y)")
 			return lib.CursorClick, false

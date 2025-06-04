@@ -123,22 +123,22 @@ func (m *VbrowserManager) SetupPipeline() error {
 func (m *Cursor) Move(x float32, y float32) error {
 	m.X = x
 	m.Y = y
-	cmdstr := fmt.Sprintf("DISPLAY :99 xdotool mousemove %f %f", x, y)
-	cmd := exec.Command(cmdstr)
+	cmd := exec.Command("xdotool", "mousemove", fmt.Sprintf("%f", x), fmt.Sprintf("%f", y))
+	cmd.Env = append(os.Environ(), "DISPLAY=:99")
 	return cmd.Run()
 }
 
 func (m *Cursor) Click() error {
 	// Execute a click
-	cmdstr := "DISPLAY :99 xdotool click 1"
-	cmd := exec.Command(cmdstr)
+	cmd := exec.Command("xdotool", "click", "1")
+	cmd.Env = append(os.Environ(), "DISPLAY=:99")
 	return cmd.Run()
 }
 
 func (k *Keyboard) SendKeys(keys string) error {
 	// Do some of that xdotools stuff
 	parsed := parseKey(keys)
-	cmdstr := fmt.Sprintf("DISPLAY :99 xdotool key %s", parsed)
+	cmdstr := fmt.Sprintf("DISPLAY=:99 xdotool key %s", parsed)
 	cmd := exec.Command(cmdstr)
 
 	return cmd.Run()

@@ -1,9 +1,11 @@
-import { useState, useEffect, useLayoutEffect, useRef, type RefObject, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, type RefObject, useMemo, useId } from "react";
 import { Button } from "./ui/button";
 import { LoaderCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { forwardRef } from "react";
 import { Switch } from "./ui/switch";
+import { CursorValue, NewCursorPayload } from "@/lib/types";
+import { NewRemoteMessage } from "@/lib/chat";
 
 export function useMouse() {
   const mouse = useRef({ x: 0, y: 0 });
@@ -107,6 +109,7 @@ export const InteractivityPad = forwardRef<
       socket,
       handleStartStream,
       handleStopStream,
+      userId,
       responseIsLoading,
       streamConnectionStatus,
       chatroomId,
@@ -138,12 +141,6 @@ export const InteractivityPad = forwardRef<
         buttonText = "Live Streaming ON!";
       }
     }
-
-    const mouse = useMouse();
-    const lastPressedKey = useKeys();
-    const mouseClick = useMouseClick(ref as RefObject<HTMLDivElement>);
-
-    console.log("Rerendered!!", streamConnectionStatus);
 
     return (
       <div
@@ -227,7 +224,11 @@ export const InteractivityPad = forwardRef<
             <span className="text-blue-500 text-sm">Keyboard mode</span>
           </div>
         </>
-        <CursorPositionTag />
+        <CursorPositionTag
+          userId={userId}
+          chatroomId={chatroomId}
+          socket={socket}
+        />
       </div>
     );
   }
@@ -263,7 +264,7 @@ function getBoundedCursorPos(
   return [adjx, adjy];
 }
 
-function CursorPositionTag() {
+function CursorPositionTag({ socket, userId, chatroomId }: { socket: WebSocket | null, userId: string, chatroomId: string }) {
   const tagRef = useRef<HTMLDivElement | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [videoStuff, setVideoStuff] = useState<ReturnType<typeof getActualVideoSize> | null>(null);
@@ -323,6 +324,37 @@ function CursorPositionTag() {
       tagRef.current.children[1].textContent = `${scale(Math.max(0, y - top), 1080, videoStuff ? videoStuff.height : 0).toFixed(0)}`;
     };
 
+    function handleMouseClick(event: MouseEvent) {
+      if (!tagRef.current) return;
+
+      const parent = tagRef.current.parentElement;
+      if (!parent) return;
+
+      const rect = parent.getBoundingClientRect();
+
+      let top = rect.top;
+      let bottom = rect.bottom;
+      let left = rect.left;
+      let right = rect.right;
+
+      if (videoStuff) {
+        const edge = (rect.height - videoStuff.height) / 2;
+        top += edge;
+        bottom -= edge;
+      }
+
+      const [_x, _y] = getBoundedCursorPos(event.clientX, event.clientY, left, right, top, bottom);
+      const x = Math.floor(scale(Math.max(0, _x - left), 1920, videoStuff ? videoStuff.width : 0))
+      const y = Math.floor(scale(Math.max(0, _y - top), 1080, videoStuff ? videoStuff.height : 0))
+
+      console.log({ x, y })
+      const payload = NewCursorPayload(x, y, CursorValue.LeftClick)
+      const message = NewRemoteMessage(userId, chatroomId, payload)
+      console.log(message)
+      socket?.send(JSON.stringify(message))
+    }
+
+    window.addEventListener("click", handleMouseClick)
     window.addEventListener("mousemove", handleMouseMove);
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, [videoStuff]);

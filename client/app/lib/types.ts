@@ -47,7 +47,7 @@ export function NewKeysRemotePayload(key: string) {
   } as RemoteMessagePayload
 }
 
-enum CursorValue {
+export enum CursorValue {
   LeftClick,
   RightClick,
   Move,
@@ -69,7 +69,7 @@ export function NewCursorPayload(x: number, y: number, click: CursorValue) {
 
   return {
     type,
-    value: `(${x},${y})`
+    value: `(${x.toFixed(0)},${y.toFixed(0)})`
   }
 }
 

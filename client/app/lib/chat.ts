@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatMessagePayload } from "./types";
+import type { ChatMessage, ChatMessagePayload, RemoteMessagePayload } from "./types";
 import type { Message } from "./types";
 
 export const createSocket = (
@@ -16,6 +16,18 @@ export const createSocket = (
 
   return ws;
 };
+
+export function NewRemoteMessage(
+  senderId: string,
+  chatroomId: string,
+  payload: RemoteMessagePayload
+) {
+  return {
+    sender: senderId,
+    subject: "stream.remote." + chatroomId,
+    payload
+  }
+}
 
 export function NewStreamMessage(
   senderId: string,

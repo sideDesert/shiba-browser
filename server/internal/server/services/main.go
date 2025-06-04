@@ -174,7 +174,6 @@ func (s *Service) CreateChatRoom(crr dto.CreateChatRoomRequest) (string, error) 
 }
 
 func (s *Service) StoreChatMessage(senderId string, chatroomId string, msg dto.ChatMessagePayload) error {
-
 	temp := store.StoreChatMessageDto{
 		Sender:     senderId,
 		ChatroomId: chatroomId,
