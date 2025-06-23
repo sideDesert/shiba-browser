@@ -6,7 +6,6 @@ import (
 
 	"sideDesert/shiba/internal/server/controller"
 	s "sideDesert/shiba/internal/server/services"
-	vb "sideDesert/shiba/internal/vbrowser"
 
 	"github.com/joho/godotenv"
 	"github.com/nats-io/nats.go"
@@ -31,7 +30,7 @@ func NewServer(ctx context.Context, config *s.ServerConfig) (*controller.Control
 		return nil, err
 	}
 
-	controller := controller.NewController(service, nc, vb.NewManager(99))
+	controller := controller.NewController(service, nc)
 
 	return controller, nil
 }

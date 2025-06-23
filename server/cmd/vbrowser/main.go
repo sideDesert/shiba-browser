@@ -10,8 +10,6 @@ import (
 	"os/signal"
 	vb "sideDesert/shiba/internal/vbrowser"
 	"syscall"
-	// "github.com/pion/rtp"
-	// "github.com/pion/webrtc/v4"
 )
 
 func main() {
@@ -42,7 +40,7 @@ func main() {
 }
 
 func runPipeline() {
-	manager := vb.NewManager(99)
+	manager := vb.NewVbManager(99)
 
 	err := manager.SetupPipeline()
 	if err != nil {

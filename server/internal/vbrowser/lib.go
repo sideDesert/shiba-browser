@@ -1,17 +1,20 @@
 package vbrowser
 
 type Cursor struct {
-	X float32
-	Y float32
+	X    float32
+	Y    float32
+	Port int
 }
 
 type Keyboard struct {
+	Port int
 }
 
-func NewCursor(x float32, y float32) Cursor {
+func NewCursor(x float32, y float32, port int) Cursor {
 	return Cursor{
-		X: x,
-		Y: y,
+		X:    x,
+		Y:    y,
+		Port: port,
 	}
 }
 

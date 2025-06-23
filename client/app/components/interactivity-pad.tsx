@@ -1,4 +1,12 @@
-import { useState, useEffect, useLayoutEffect, useRef, type RefObject, useMemo, useId } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type RefObject,
+  useMemo,
+  useId,
+} from "react";
 import { Button } from "./ui/button";
 import { LoaderCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -70,9 +78,8 @@ type InteractivityPadProps = {
 };
 
 function getActualVideoSize(elementWidth: number, elementHeight: number) {
-
-  const naturalWidth = 1920
-  const naturalHeight = 1080
+  const naturalWidth = 1920;
+  const naturalHeight = 1080;
 
   const naturalRatio = naturalWidth / naturalHeight;
   const elementRatio = elementWidth / elementHeight;
@@ -97,7 +104,6 @@ function getActualVideoSize(elementWidth: number, elementHeight: number) {
     elementWidth,
     elementHeight,
   };
-
 }
 
 export const InteractivityPad = forwardRef<
@@ -118,6 +124,7 @@ export const InteractivityPad = forwardRef<
     ref
   ) => {
     const [showButton, setShowButton] = useState(true);
+    const isStreaming = !showButton;
     const [startStream, setStreamLoading] = useState<boolean | null>(null);
     const [sendKeys, setSendKeys] = useState(true);
     const qc = useQueryClient();
@@ -157,8 +164,8 @@ export const InteractivityPad = forwardRef<
                 streamConnectionStatus === "connected"
                   ? "none"
                   : showButton
-                    ? "flex"
-                    : "none",
+                  ? "flex"
+                  : "none",
             }}
             disabled={!hasRemote}
             onClick={async () => {
@@ -168,7 +175,6 @@ export const InteractivityPad = forwardRef<
                 await qc.fetchQuery({
                   queryKey: ["stream", chatroomId],
                 });
-
                 setShowButton(false);
                 setStreamLoading(false);
               }
@@ -184,8 +190,8 @@ export const InteractivityPad = forwardRef<
                 streamConnectionStatus === "connected"
                   ? "block"
                   : showButton
-                    ? "none"
-                    : "block",
+                  ? "none"
+                  : "block",
             }}
             className="border h-full w-full"
             id="video"
@@ -228,6 +234,7 @@ export const InteractivityPad = forwardRef<
           userId={userId}
           chatroomId={chatroomId}
           socket={socket}
+          isStreaming={isStreaming}
         />
       </div>
     );
@@ -264,10 +271,21 @@ function getBoundedCursorPos(
   return [adjx, adjy];
 }
 
-function CursorPositionTag({ socket, userId, chatroomId }: { socket: WebSocket | null, userId: string, chatroomId: string }) {
+function CursorPositionTag({
+  socket,
+  userId,
+  chatroomId,
+  isStreaming,
+}: {
+  socket: WebSocket | null;
+  userId: string;
+  chatroomId: string;
+  isStreaming: boolean;
+}) {
   const tagRef = useRef<HTMLDivElement | null>(null);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [videoStuff, setVideoStuff] = useState<ReturnType<typeof getActualVideoSize> | null>(null);
+  const [videoStuff, setVideoStuff] = useState<ReturnType<
+    typeof getActualVideoSize
+  > | null>(null);
 
   useLayoutEffect(() => {
     const tag = tagRef.current;
@@ -293,7 +311,6 @@ function CursorPositionTag({ socket, userId, chatroomId }: { socket: WebSocket |
   useLayoutEffect(() => {
     if (!tagRef.current) return;
     const rect = tagRef.current.getBoundingClientRect();
-    setOffset({ x: rect.width / 2, y: rect.height / 2 });
   }, []);
 
   useEffect(() => {
@@ -316,12 +333,27 @@ function CursorPositionTag({ socket, userId, chatroomId }: { socket: WebSocket |
         bottom -= edge;
       }
 
-      const [x, y] = getBoundedCursorPos(event.clientX, event.clientY, left, right, top, bottom);
+      const [x, y] = getBoundedCursorPos(
+        event.clientX,
+        event.clientY,
+        left,
+        right,
+        top,
+        bottom
+      );
 
       tagRef.current.style.left = `${x}px`;
       tagRef.current.style.top = `${y}px`;
-      tagRef.current.children[0].textContent = `${scale(Math.max(0, x - left), 1920, videoStuff ? videoStuff.width : 0).toFixed(0)},`;
-      tagRef.current.children[1].textContent = `${scale(Math.max(0, y - top), 1080, videoStuff ? videoStuff.height : 0).toFixed(0)}`;
+      tagRef.current.children[0].textContent = `${scale(
+        Math.max(0, x - left),
+        1920,
+        videoStuff ? videoStuff.width : 0
+      ).toFixed(0)},`;
+      tagRef.current.children[1].textContent = `${scale(
+        Math.max(0, y - top),
+        1080,
+        videoStuff ? videoStuff.height : 0
+      ).toFixed(0)}`;
     };
 
     function handleMouseClick(event: MouseEvent) {
@@ -343,20 +375,41 @@ function CursorPositionTag({ socket, userId, chatroomId }: { socket: WebSocket |
         bottom -= edge;
       }
 
-      const [_x, _y] = getBoundedCursorPos(event.clientX, event.clientY, left, right, top, bottom);
-      const x = Math.floor(scale(Math.max(0, _x - left), 1920, videoStuff ? videoStuff.width : 0))
-      const y = Math.floor(scale(Math.max(0, _y - top), 1080, videoStuff ? videoStuff.height : 0))
+      const [_x, _y] = getBoundedCursorPos(
+        event.clientX,
+        event.clientY,
+        left,
+        right,
+        top,
+        bottom
+      );
+      const x = Math.floor(
+        scale(Math.max(0, _x - left), 1920, videoStuff ? videoStuff.width : 0)
+      );
+      const y = Math.floor(
+        scale(Math.max(0, _y - top), 1080, videoStuff ? videoStuff.height : 0)
+      );
 
-      console.log({ x, y })
-      const payload = NewCursorPayload(x, y, CursorValue.LeftClick)
-      const message = NewRemoteMessage(userId, chatroomId, payload)
-      console.log(message)
-      socket?.send(JSON.stringify(message))
+      console.log({ x, y });
+      const payload = NewCursorPayload(x, y, CursorValue.LeftClick);
+      const message = NewRemoteMessage(userId, chatroomId, payload);
+      console.log(message);
+      // socket?.send(JSON.stringify(message))
     }
 
-    window.addEventListener("click", handleMouseClick)
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
+    const parent = tagRef.current?.parentElement;
+    if (parent) {
+      parent.addEventListener("click", handleMouseClick);
+      parent.addEventListener("mousemove", handleMouseMove);
+    }
+
+    return () => {
+      const parent = tagRef.current?.parentElement;
+      if (parent) {
+        parent.removeEventListener("mousemove", handleMouseMove);
+        parent.removeEventListener("click", handleMouseClick);
+      }
+    };
   }, [videoStuff]);
 
   return (
@@ -382,5 +435,5 @@ function CursorPositionTag({ socket, userId, chatroomId }: { socket: WebSocket |
 }
 
 function scale(x: number, R: number, X: number) {
-  return (R / X) * x
+  return (R / X) * x;
 }

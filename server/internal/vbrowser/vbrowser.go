@@ -23,32 +23,38 @@ const (
 )
 
 type VbrowserManager struct {
-	Display      *Display
-	Pipeline     *gst.Pipeline
-	Ws           *websocket.Conn
-	UdpVideoPort int
-	UdpAudioPort int
-	Ready        chan Step
-	ConnReady    chan Step
-	Cursor       Cursor
-	Keyboard     Keyboard
+	Display   *Display
+	Pipeline  *gst.Pipeline
+	Ws        *websocket.Conn
+	Ready     chan Step
+	ConnReady chan Step
+	Cursor    Cursor
+	Keyboard  Keyboard
 
 	pid        int
 	defaultUrl string
 }
 
-func NewManager(port int) *VbrowserManager {
+func NewVbManager(port int) *VbrowserManager {
 	return &VbrowserManager{
-		Display:      NewDisplay(port, 1080, 1920, 60),
-		Ready:        make(chan Step, 5),
-		ConnReady:    make(chan Step, 5),
-		defaultUrl:   "https://www.youtube.com/watch?v=OPK14FrnjO0&ab_channel=JackHarlow",
-		Cursor:       NewCursor(0, 0),
-		Keyboard:     Keyboard{},
-		UdpVideoPort: 5005,
-		UdpAudioPort: 5006,
+		Display:    NewDisplay(port, 1080, 1920, 60),
+		Ready:      make(chan Step, 5),
+		ConnReady:  make(chan Step, 5),
+		defaultUrl: "https://www.youtube.com/watch?v=OPK14FrnjO0&ab_channel=JackHarlow",
+		Cursor:     NewCursor(0, 0, port),
+		Keyboard: Keyboard{
+			Port: port,
+		},
 	}
 }
+
+func (m *VbrowserManager) SetPort(port int) {
+	m.Display.Port = port
+	m.Keyboard.Port = port
+	m.Cursor.Port = port
+}
+
+// TODO : IMplement this
 
 func (m *VbrowserManager) SetWs(ws *websocket.Conn) {
 	m.Ws = ws
@@ -131,14 +137,14 @@ func (m *Cursor) Move(x float32, y float32) error {
 func (m *Cursor) Click() error {
 	// Execute a click
 	cmd := exec.Command("xdotool", "click", "1")
-	cmd.Env = append(os.Environ(), "DISPLAY=:99")
+	cmd.Env = append(os.Environ(), "DISPLAY=:"+strconv.Itoa(m.Port))
 	return cmd.Run()
 }
 
 func (k *Keyboard) SendKeys(keys string) error {
 	// Do some of that xdotools stuff
 	parsed := parseKey(keys)
-	cmdstr := fmt.Sprintf("DISPLAY=:99 xdotool key %s", parsed)
+	cmdstr := fmt.Sprintf("DISPLAY=:%d xdotool key %s", k.Port, parsed)
 	cmd := exec.Command(cmdstr)
 
 	return cmd.Run()

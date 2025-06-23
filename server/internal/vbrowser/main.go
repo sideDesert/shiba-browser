@@ -51,7 +51,6 @@ func (d *VbrowserManager) StartVirtualBrowser(ctx context.Context) {
 		"--disable-gpu",
 		"--new-window",
 		"--user-data-dir=./tmp/chrome-xvfb", // Separate profile
-		"--remote-debugging-port=9222",
 		d.defaultUrl,
 	)
 

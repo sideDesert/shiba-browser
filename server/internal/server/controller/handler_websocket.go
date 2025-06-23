@@ -9,10 +9,10 @@ import (
 	"sideDesert/shiba/internal/server/lib"
 	"strings"
 
-	"github.com/go-gst/go-gst/gst"
 	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
 	"github.com/pion/webrtc/v4"
+	"golang.org/x/net/context"
 )
 
 func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
@@ -33,7 +33,7 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 	}
 
 	// Fetch user chat rooms
-	chatrooms, err := c.s.GetUserChatRooms(userId)
+	userChatrooms, err := c.s.GetUserChatRooms(userId)
 	if err != nil {
 		log.Println("🚨Error in handleChatWebsocket[GetUserChatRooms]:", err)
 		return err
@@ -44,6 +44,17 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
+	}
+
+	c.mu.Lock()
+	chatroomCtx, ok := c.chatroomCtx[chatroomId]
+	c.mu.Unlock()
+
+	if !ok {
+		c.mu.Lock()
+		c.chatroomCtx[chatroomId] = NewChatroomCtx(context.Background(), -1)
+		chatroomCtx = c.chatroomCtx[chatroomId]
+		c.mu.Lock()
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -85,15 +96,16 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 	log.Println("🫂 Total active connections:", len(c.conns))
 
 	// Subscribe to chat rooms
+	// This is the part of code taking care of SENDING MESSAGES TO ALL PEERS
 	currentConn := c.conns[conn]
-	for _, room := range chatrooms {
+	for _, room := range userChatrooms {
 		chatroomId := room.Id
-		sub, err := c.nats.Subscribe("chatrooms."+chatroomId, func(msg *nats.Msg) {
+		sub, err := c.nats.Subscribe("chatrooms.chat."+chatroomId, func(msg *nats.Msg) {
 			log.Println("Received Message:", string(msg.Data))
 			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
 
 			if err != nil {
-				log.Println("🚨 Error writing WebSocket message:", err)
+				log.Println("🚨 Error writing WebSocket[chatroom.chat.*] message:", err)
 				// Remove connection from cache safely
 				c.mu.Lock()
 				delete(c.conns, conn)
@@ -104,15 +116,32 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			}
 		})
 		if err != nil {
-			log.Println("🚨 Error subscribing to NATS[chatrooms.*]:", err)
+			log.Println("🚨 Error subscribing to NATS[chatrooms.chat.*]:", err)
 			continue
 		}
-		currentConn.Subscriptions = append(currentConn.Subscriptions, sub)
 
+		// Signalling
+		currentConn.Subscriptions = append(currentConn.Subscriptions, sub)
+		sub, err = c.nats.Subscribe("chatrooms.signal."+chatroomId, func(msg *nats.Msg) {
+			log.Println("Received Signal:", string(msg.Data))
+			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
+
+			if err != nil {
+				log.Println("🚨 Error writing WebSocket[chatroom.signal.*] message:", err)
+				return
+			}
+		})
+
+		if err != nil {
+			log.Println("🚨 Error subscribing to NATS[chatrooms.signal.*]:", err)
+			continue
+		}
+
+		// Webrtc Signalling
 		sub, err = c.nats.Subscribe("webrtc.*."+chatroomId, func(msg *nats.Msg) {
 			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
 			if err != nil {
-				log.Println("🚨 Error writing WebSocket Webrtc Message:", err)
+				log.Println("🚨 Error writing WebSocket[webrtc.*] Webrtc Message:", err)
 				// Remove connection from cache safely
 				c.mu.Lock()
 				delete(c.conns, conn)
@@ -130,6 +159,8 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 	}
 
 	// Listen for messages
+	// This is the part of code taking care of HANDLING MESSAGES received from the websocket
+
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
@@ -147,6 +178,55 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 
 		if err != nil {
 			log.Println("🚨Error Unmarshalling initMsgObj: ", err)
+		}
+
+		// Signal can be of alot of types
+		if strings.HasPrefix(initMsgObj.Subject, "signal") {
+			// Init Indiv Calls  (signal.init-ic.<cid>)
+			// Init Group Calls  (signal.init-gc.<cid>)
+			// Indiv Call Answer (signal.ans-ic.<cid>)
+			// End Call          (signal.end-call.<cid>)
+			// Join Call         (signal.join-call.<cid>)
+			// Leave Call        (signal.leave-call.<cid>)
+			// Start Stream      (signal.start-stream.<cid>)
+			// Join Stream       (signal.join-stream.<cid>)
+			// Leave Stream      (signal.leave-stream.<cid>)
+			// End Stream        (signal.end-stream.<cid>)
+
+			s := strings.Split(initMsgObj.Subject, ".")
+			if len(s) != 3 {
+				log.Println("❌ Error in msg[signal] type:")
+				continue
+			}
+			//TODO: Handle all cases of signalling
+			chatroomId := s[2]
+			signalType := s[1]
+
+			switch signalType {
+			case "init-ic":
+				if userId == initMsgObj.Sender {
+					// Join the call
+					continue
+				}
+			case "init-gc":
+				if userId == initMsgObj.Sender {
+					// Join the call
+					continue
+				}
+			case "ans-ic":
+				if userId == initMsgObj.Sender {
+					// Join the call
+					continue
+				}
+			case "end-call":
+			case "join-call":
+			case "leave-call":
+			case "start-stream":
+			case "leave-stream":
+			case "end-stream":
+			}
+
+			c.nats.Publish("chatrooms."+chatroomId, msg)
 		}
 
 		if strings.HasPrefix(initMsgObj.Subject, "chat") {
@@ -273,6 +353,10 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			}
 
 			if msgType == "remote" {
+				if chatroomCtx.BrowserManager.Display.Port == -1 {
+					continue
+				}
+				browserManager := chatroomCtx.BrowserManager
 				log.Println("🕹️Remote", chatroomId)
 				payloadMap, ok := initMsgObj.Payload.(map[string]interface{})
 				if !ok {
@@ -307,12 +391,12 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 					}
 
 					if payloadType == lib.CursorClick {
-						err := c.browserManager.Cursor.Move(x, y)
+						err := browserManager.Cursor.Move(x, y)
 						if err != nil {
 							log.Println("🚨Error[CursorClick.Move]:", err)
 							continue
 						}
-						err = c.browserManager.Cursor.Click()
+						err = browserManager.Cursor.Click()
 						if err != nil {
 							log.Println("Error[CursorClick.Click]:", err)
 							continue
@@ -320,7 +404,7 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 					}
 
 					if payloadType == lib.CursorMove {
-						err = c.browserManager.Cursor.Move(x, y)
+						err = browserManager.Cursor.Move(x, y)
 						if err != nil {
 							log.Println("🚨Error[CursorMove.Move]:", err)
 							continue
@@ -335,7 +419,7 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 						continue
 					}
 
-					err = c.browserManager.Keyboard.SendKeys(keys)
+					err = browserManager.Keyboard.SendKeys(keys)
 					if err != nil {
 						log.Println("🚨Error[Keys]:", err)
 						continue
@@ -346,32 +430,33 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 				}
 			}
 
-			if msgType == "stop-stream" {
-				log.Println("⛔ Stopping Stream")
+			// This is the old version of stopping stream
+			// if msgType == "stop-stream" {
+			// 	log.Println("⛔ Stopping Stream")
 
-				err := c.browserManager.Pipeline.SetState(gst.StateNull)
-				if err != nil {
-					log.Println("Error stopping stream[Pipeline.SetState(gst.StateNull)]", err)
-				}
+			// 	err := browserManager.Pipeline.SetState(gst.StateNull)
+			// 	if err != nil {
+			// 		log.Println("Error stopping stream[Pipeline.SetState(gst.StateNull)]", err)
+			// 	}
 
-				userIds, err := c.s.Store.GetUsersByChatroomId(c.s.Ctx, chatroomId)
-				if err != nil {
-					log.Println("Error getting users by chatroom id:", err)
-				}
+			// 	userIds, err := c.s.Store.GetUsersByChatroomId(c.s.Ctx, chatroomId)
+			// 	if err != nil {
+			// 		log.Println("Error getting users by chatroom id:", err)
+			// 	}
 
-				c.mu.Lock()
-				for _, conn := range c.conns {
-					if lib.Contains(userIds, conn.UserId) {
-						conn.StreamConfig.PeerConnection.Close()
-					}
-				}
-				c.mu.Unlock()
+			// 	c.mu.Lock()
+			// 	for _, conn := range c.conns {
+			// 		if lib.Contains(userIds, conn.UserId) {
+			// 			conn.StreamConfig.PeerConnection.Close()
+			// 		}
+			// 	}
+			// 	c.mu.Unlock()
 
-				c.chatroomCtx[chatroomId].cancel()
-				delete(c.chatroomCtx, chatroomId)
-				log.Println("⛔👍Stream Ended")
-				break
-			}
+			// 	c.chatroomCtx[chatroomId].cancel()
+			// 	delete(c.chatroomCtx, chatroomId)
+			// 	log.Println("⛔👍Stream Ended")
+			// 	break
+			// }
 		}
 	}
 

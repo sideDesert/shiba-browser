@@ -17,31 +17,47 @@ import (
 )
 
 type Controller struct {
-	s              *services.Service
-	nats           *nats.Conn
-	conns          map[*websocket.Conn]*lib.ConnMap
-	chatroomCtx    map[string]ChatroomCtx
-	mu             sync.Mutex
-	browserManager *vb.VbrowserManager
+	s           *services.Service
+	nats        *nats.Conn
+	conns       map[*websocket.Conn]*lib.ConnMap
+	chatroomCtx map[string]ChatroomCtx
+	mu          sync.Mutex
 }
 
 type ChatroomCtx struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	Streaming bool
+	ctx            context.Context
+	cancel         context.CancelFunc
+	Streaming      bool
+	Port           int
+	BrowserManager *vb.VbrowserManager
+}
+
+func NewChatroomCtx(ctx context.Context, port int) ChatroomCtx {
+	ctx, cancel := context.WithCancel(ctx)
+	return ChatroomCtx{
+		ctx:            ctx,
+		cancel:         cancel,
+		Streaming:      true,
+		Port:           port,
+		BrowserManager: vb.NewVbManager(port),
+	}
+}
+
+// TODO: IMplement this
+func (c *Controller) NewVideoPort() (int, error) {
+	return 99, nil
 }
 
 func (c *Controller) CloseDbConn(ctx context.Context) {
 	c.s.Store.Close(ctx)
 }
 
-func NewController(s *services.Service, nats *nats.Conn, browserManager *vb.VbrowserManager) *Controller {
+func NewController(s *services.Service, nats *nats.Conn) *Controller {
 	return &Controller{
-		s:              s,
-		nats:           nats,
-		conns:          make(map[*websocket.Conn]*lib.ConnMap),
-		chatroomCtx:    make(map[string]ChatroomCtx),
-		browserManager: browserManager,
+		s:           s,
+		nats:        nats,
+		conns:       make(map[*websocket.Conn]*lib.ConnMap),
+		chatroomCtx: make(map[string]ChatroomCtx),
 	}
 }
 
@@ -64,8 +80,8 @@ func (c *Controller) Run(port string) {
 		"friends":          common.NewCMV(c.handleFriends, true),
 		"notifications":    common.NewCMV(c.handleNotifications, true),
 		"search":           common.NewCMV(c.handleSearch, true),
-		"stream":           common.NewCMV(c.handleStream, true),
-		"remote":           common.NewCMV(c.handleRemote, true),
+		// "stream":           common.NewCMV(c.handleStream, true),
+		"remote": common.NewCMV(c.handleRemote, true),
 	}
 
 	for key, value := range controllerMap {

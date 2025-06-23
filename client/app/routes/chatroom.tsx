@@ -568,7 +568,7 @@ export default function Page() {
             className={`h-full block border ${showH1 ? "border-gray-300" : "border-blue-500"
               }`}
           >
-            {userData?.user_id && (
+            {userData?.user_id && IHaveRemote() && (
               <InteractivityPad
                 userId={userId ?? ""}
                 chatroomId={chatroomId}

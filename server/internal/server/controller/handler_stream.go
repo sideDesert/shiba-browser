@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
-	"net/http"
 	"sideDesert/shiba/internal/server/dto"
 	"sideDesert/shiba/internal/server/lib"
 	"sideDesert/shiba/internal/vbrowser"
@@ -17,19 +15,11 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 )
 
-func (c *Controller) handleStream(w http.ResponseWriter, r *http.Request) error {
-	userId := r.Context().Value("userId").(string)
-	chatroomId := r.URL.Query().Get("cid")
+func (c *Controller) handleStream(userId string, chatroomId string) error {
 
-	if r.Method != http.MethodGet {
-		return fmt.Errorf("Method not allowed: %s", r.Method)
-	}
-	if chatroomId == "" {
-		return fmt.Errorf("Query Params Missing chatroom id")
-	}
-	if isRemote := c.s.CheckUserIsRemoteForChatroom(userId, chatroomId); !isRemote {
-		return fmt.Errorf("User is not remote for chatroom")
-	}
+	// if isRemote := c.s.CheckUserIsRemoteForChatroom(userId, chatroomId); !isRemote {
+	// 	return fmt.Errorf("User is not remote for chatroom")
+	// }
 
 	chatroomUsersIds, err := c.s.Store.GetUsersByChatroomId(c.s.Ctx, chatroomId)
 	if err != nil {
@@ -40,6 +30,7 @@ func (c *Controller) handleStream(w http.ResponseWriter, r *http.Request) error 
 	c.mu.Lock()
 	chatroomCtx, ok := c.chatroomCtx[chatroomId]
 	c.mu.Unlock()
+
 	if ok {
 		if chatroomCtx.Streaming {
 			log.Println("Error: Streaming already taking place for chatroom - ", chatroomId)
@@ -48,23 +39,26 @@ func (c *Controller) handleStream(w http.ResponseWriter, r *http.Request) error 
 	}
 
 	if !ok {
-		ctx, cancel := context.WithCancel(context.Background())
-		c.mu.Lock()
-		c.chatroomCtx[chatroomId] = ChatroomCtx{
-			ctx:       ctx,
-			cancel:    cancel,
-			Streaming: true,
+		port, err := c.NewVideoPort()
+		if err != nil {
+			return err
 		}
+		nctx := NewChatroomCtx(context.Background(), port)
+		c.mu.Lock()
+		c.chatroomCtx[chatroomId] = nctx
 		c.mu.Unlock()
 	}
-
+	c.mu.Lock()
 	ctx := c.chatroomCtx[chatroomId].ctx
+	c.mu.Unlock()
 
-	go c.browserManager.StartVirtualBrowser(ctx)
-	go c.browserManager.StartVideoStream(ctx)
+	bm := chatroomCtx.BrowserManager
+
+	go bm.StartVirtualBrowser(ctx)
+	go bm.StartVideoStream(ctx)
 
 	for {
-		step := <-c.browserManager.ConnReady
+		step := <-bm.ConnReady
 		if step == vbrowser.StepPipelineReady {
 
 			activePeers, err := c.getActivePeers(chatroomUsersIds, chatroomId)
@@ -74,7 +68,7 @@ func (c *Controller) handleStream(w http.ResponseWriter, r *http.Request) error 
 			}
 
 			// VIDEO Stream Handler
-			elem, err := c.browserManager.Pipeline.GetElementByName("videoSink")
+			elem, err := bm.Pipeline.GetElementByName("videoSink")
 			if err != nil {
 				log.Println("Error in converting videoSink element from pipeline:")
 				return fmt.Errorf("error in getting videoSink element from pipeline")
@@ -112,7 +106,7 @@ func (c *Controller) handleStream(w http.ResponseWriter, r *http.Request) error 
 			})
 
 			// AUDIO
-			elem, err = c.browserManager.Pipeline.GetElementByName("audioSink")
+			elem, err = bm.Pipeline.GetElementByName("audioSink")
 			if err != nil {
 				log.Println("Error in getting audioSink element from pipeline:", err)
 				return err
@@ -148,12 +142,6 @@ func (c *Controller) handleStream(w http.ResponseWriter, r *http.Request) error 
 					return gst.FlowOK
 				},
 			})
-
-			return lib.WriteJSON(w, r, http.StatusOK, struct {
-				Status string `json:"status"`
-			}{
-				Status: "started",
-			})
 		}
 	}
 }
@@ -178,53 +166,6 @@ type HandleVideoStreamConfig struct {
 	audioSSRC       uint32
 	videoSeqCounter uint16
 	audioSeqCounter uint16
-}
-
-func _legacy_getStreamPacketConns(videoPort int, audioPort int) (net.PacketConn, net.PacketConn, error) {
-	log.Println("🏁Listenning for video on port:", videoPort)
-	vconn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", videoPort))
-	if err != nil {
-		log.Println("👺Error creating video stream:", err)
-		return nil, nil, err
-
-	}
-	log.Println("Listenning for audio on port:", audioPort)
-
-	aconn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", audioPort))
-	if err != nil {
-		log.Println("👺Error creating audio stream:", err)
-		return nil, nil, err
-	}
-
-	return vconn, aconn, nil
-}
-
-func handleVideoStream(ctx context.Context, config HandleVideoStreamConfig) {
-	// Video handler goroutine
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				log.Println("Context done for video stream")
-				return
-			default:
-			}
-		}
-	}()
-
-	// Audio handler goroutine
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				log.Println("Context done for audio stream")
-				return
-			default:
-			}
-		}
-	}()
-	<-ctx.Done()
-	log.Println("Closing stream conn in handleVideoStream")
 }
 
 func (c *Controller) getActivePeers(chatroomUsersIds []string, chatroomId string) ([]ActivePeer, error) {
