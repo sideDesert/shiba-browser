@@ -14,8 +14,11 @@ export const UserChatroomSchema = z.object({
 export type UserChatroom = z.infer<typeof UserChatroomSchema>;
 
 export type Message<T> = {
+  // Subject can we - chatroom.chat.<cid>, chatroom.sfu.<cid>, chatroom.signal.<cid>
   subject: string;
+  // Sender is always userId
   sender: string;
+  // Payload depends on different type of messages
   payload: T;
 };
 
@@ -36,15 +39,15 @@ export type ChatMessagePayload = {
 };
 
 export type RemoteMessagePayload = {
-  type: string
-  value: string
-}
+  type: string;
+  value: string;
+};
 
 export function NewKeysRemotePayload(key: string) {
   return {
     type: "key",
-    value: key
-  } as RemoteMessagePayload
+    value: key,
+  } as RemoteMessagePayload;
 }
 
 export enum CursorValue {
@@ -54,25 +57,24 @@ export enum CursorValue {
 }
 
 export function NewCursorPayload(x: number, y: number, click: CursorValue) {
-  let type = "cursor.move"
+  let type = "cursor.move";
   if (click == CursorValue.LeftClick) {
-    type = "cursor.left_click"
+    type = "cursor.left_click";
   }
 
   if (click == CursorValue.RightClick) {
-    type = "cursor.right_click"
+    type = "cursor.right_click";
   }
 
   if (click == CursorValue.Move) {
-    type = "cursor.move"
+    type = "cursor.move";
   }
 
   return {
     type,
-    value: `(${x.toFixed(0)},${y.toFixed(0)})`
-  }
+    value: `(${x.toFixed(0)},${y.toFixed(0)})`,
+  };
 }
-
 
 export const UserSchema = z.object({
   user_id: z.string(),

@@ -173,7 +173,7 @@ func (s *Service) CreateChatRoom(crr dto.CreateChatRoomRequest) (string, error) 
 	return s.Store.CreateChatRoom(s.Ctx, crr)
 }
 
-func (s *Service) StoreChatMessage(senderId string, chatroomId string, msg dto.ChatMessagePayload) error {
+func (s *Service) StoreChatMessage(senderId string, chatroomId string, msg lib.ChatPayload) error {
 	temp := store.StoreChatMessageDto{
 		Sender:     senderId,
 		ChatroomId: chatroomId,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sideDesert/shiba/internal/server/dto"
 	"sideDesert/shiba/internal/server/lib"
 	"sideDesert/shiba/internal/vbrowser"
 	"time"
@@ -43,7 +42,7 @@ func (c *Controller) handleStream(userId string, chatroomId string) error {
 		if err != nil {
 			return err
 		}
-		nctx := NewChatroomCtx(context.Background(), port)
+		nctx := c.NewChatroomCtx(context.Background(), chatroomId, port)
 		c.mu.Lock()
 		c.chatroomCtx[chatroomId] = nctx
 		c.mu.Unlock()
@@ -192,7 +191,7 @@ func (c *Controller) getActivePeers(chatroomUsersIds []string, chatroomId string
 			if candidate == nil {
 				return
 			}
-			msg := dto.Message[webrtc.ICECandidateInit]{
+			msg := lib.SFUIceMessage{
 				Sender:  "server",
 				Subject: "stream.ice." + chatroomId + "." + config.UserId,
 				Payload: candidate.ToJSON(),
@@ -206,7 +205,7 @@ func (c *Controller) getActivePeers(chatroomUsersIds []string, chatroomId string
 		pc.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
 			if state == webrtc.ICEGatheringStateComplete {
 				for _, candidate := range config.StreamConfig.IceCandidates {
-					msg := dto.Message[webrtc.ICECandidateInit]{
+					msg := lib.SocketMessage[webrtc.ICECandidateInit]{
 						Sender:  "server",
 						Subject: "stream.ice." + chatroomId + "." + config.UserId,
 						Payload: candidate.ToJSON(),
@@ -229,7 +228,7 @@ func (c *Controller) getActivePeers(chatroomUsersIds []string, chatroomId string
 			return activePeers, err
 		}
 
-		ws.WriteJSON(dto.Message[string]{
+		ws.WriteJSON(lib.SFUSdpuMessage{
 			Sender:  "server",
 			Subject: "stream.offer." + chatroomId + "." + config.UserId,
 			Payload: sdp.SDP,

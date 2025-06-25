@@ -11,6 +11,15 @@ type ApiError struct {
 	Error string `json:"error"`
 }
 
+type SocketMessage[T any] struct {
+	// Subject can be - chatroom.chat.<cid>, chatroom.sfu.<cid>, chatroom.signal.<cid>
+	Subject string `json:"subject"`
+	// Sender is always userId
+	Sender string `json:"sender"`
+	// Payload depends on different type of messages
+	Payload T `json:"payload"`
+}
+
 type StreamConfig struct {
 	PeerConnection *webrtc.PeerConnection         `json:"peer_connection"`
 	IceCandidates  []*webrtc.ICECandidate         `json:"ice_candidates"`

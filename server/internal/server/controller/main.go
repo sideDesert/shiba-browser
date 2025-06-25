@@ -8,12 +8,12 @@ import (
 	"sideDesert/shiba/internal/server/lib"
 	"sideDesert/shiba/internal/server/services"
 	vb "sideDesert/shiba/internal/vbrowser"
-
 	"sync"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
+	"github.com/pion/ion-sfu/pkg/sfu"
 )
 
 type Controller struct {
@@ -22,24 +22,36 @@ type Controller struct {
 	conns       map[*websocket.Conn]*lib.ConnMap
 	chatroomCtx map[string]ChatroomCtx
 	mu          sync.Mutex
+	sfu         *sfu.SFU
 }
 
 type ChatroomCtx struct {
-	ctx            context.Context
-	cancel         context.CancelFunc
-	Streaming      bool
-	Port           int
-	BrowserManager *vb.VbrowserManager
+	Users              map[string]*websocket.Conn
+	BrowserManager     *vb.VbrowserManager
+	CallParticipants   map[string]*sfu.Peer
+	StreamParticipants map[string]*sfu.PeerLocal
+	Session            *sfu.Session
+	Streaming          bool
+	Port               int
+	ctx                context.Context
+	cancel             context.CancelFunc
 }
 
-func NewChatroomCtx(ctx context.Context, port int) ChatroomCtx {
+func (c *Controller) NewChatroomCtx(ctx context.Context, cid string, port int) ChatroomCtx {
 	ctx, cancel := context.WithCancel(ctx)
+
+	session, _ := c.sfu.GetSession(cid)
+
 	return ChatroomCtx{
-		ctx:            ctx,
-		cancel:         cancel,
-		Streaming:      true,
-		Port:           port,
-		BrowserManager: vb.NewVbManager(port),
+		ctx:                ctx,
+		cancel:             cancel,
+		Streaming:          true,
+		Port:               port,
+		BrowserManager:     vb.NewVbManager(port),
+		Users:              make(map[string]*websocket.Conn),
+		CallParticipants:   make(map[string]*sfu.Peer),
+		StreamParticipants: make(map[string]*sfu.PeerLocal),
+		Session:            &session,
 	}
 }
 
@@ -58,6 +70,7 @@ func NewController(s *services.Service, nats *nats.Conn) *Controller {
 		nats:        nats,
 		conns:       make(map[*websocket.Conn]*lib.ConnMap),
 		chatroomCtx: make(map[string]ChatroomCtx),
+		sfu:         sfu.NewSFU(sfu.Config{}),
 	}
 }
 

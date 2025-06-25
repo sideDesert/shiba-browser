@@ -3,22 +3,26 @@ import { InteractivityPad } from "@/components/interactivity-pad";
 import { get } from "@/lib/utils";
 import { Anchor, Phone, PhoneOff } from "lucide-react";
 import type { Route } from "./+types/home";
-import { createSocket, NewChatMessage } from "@/lib/chat";
+import {
+  createSocket,
+  NewChatMessage,
+  NewWsChatMessage,
+  NewWebrtcMessage,
+} from "@/lib/chat";
+import { type ChatMessagePayload } from "@/lib/types";
 
 import type { ChatMessage, Message, RemoteResponse, User } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState, useRef } from "react";
 import { Chat } from "@/components/chat";
-import { type ChatMessagePayload } from "@/lib/types";
 import { DAL, useDAL } from "@/dal";
 
 import { useParams } from "react-router";
 import { WS_URL } from "@/root";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { NewWsChatMessage, NewWebrtcMessage } from "@/lib/chat";
 
-export function meta({ }: Route.MetaArgs) {
+export function meta({}: Route.MetaArgs) {
   return [
     { title: "Chatroom" },
     { name: "description", content: "Welcome to Shiba Chatroom!" },
@@ -251,7 +255,7 @@ export default function Page() {
               console.log("REMOTE sending ICE candidate");
               socket.current.send(
                 JSON.stringify({
-                  subject: "webrtc.ice." + chatroomId,
+                  subject: "chatrooms.sfu.ice." + chatroomId,
                   sender: userData?.user_id,
                   payload: event.candidate,
                 })
@@ -565,8 +569,9 @@ export default function Page() {
       <div className="relative w-full border-black flex grow-1">
         <div className="w-[80%]">
           <div
-            className={`h-full block border ${showH1 ? "border-gray-300" : "border-blue-500"
-              }`}
+            className={`h-full block border ${
+              showH1 ? "border-gray-300" : "border-blue-500"
+            }`}
           >
             {userData?.user_id && IHaveRemote() && (
               <InteractivityPad
