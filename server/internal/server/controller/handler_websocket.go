@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,12 +11,11 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
 	"github.com/pion/ion-sfu/pkg/sfu"
-	"github.com/pion/webrtc/v3"
 )
 
 func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
 	// Extract user ID from request context
-	log := logger.NewLogger(logger.File, "handleWebsocket")
+	log := logger.NewLogger(logger.Console, "handleWebsocket")
 
 	userId, ok := r.Context().Value("userId").(string)
 	chatroomId := r.URL.Query().Get("cid")
@@ -46,29 +44,14 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			return true
 		},
 	}
-
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Error("upgrader", err)
 		return err
 	}
 
-	c.mu.Lock()
-	chatroomCtx, ok := c.chatroomCtx[chatroomId]
-	c.mu.Unlock()
+	c.GetChatroomCtx(chatroomId).AddUser(userId, conn)
 
-	if !ok {
-		c.mu.Lock()
-		c.chatroomCtx[chatroomId] = c.NewChatroomCtx(context.Background(), chatroomId, -1)
-		c.mu.Lock()
-	}
-
-	c.mu.Lock()
-	c.chatroomCtx[chatroomId].Users[userId] = conn
-	chatroomCtx = c.chatroomCtx[chatroomId]
-	c.mu.Unlock()
-
-	// Store client connection - this creates the peer connection as well
 	connsVal, err := lib.NewConnMap(userId)
 	if err != nil {
 		log.Error("upgrader", err)
@@ -92,13 +75,16 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 			connVal.StreamConfig.PeerConnection.Close()
 
 			delete(c.conns, conn)
-			delete(c.chatroomCtx[chatroomId].Users, userId)
-
-			if len(c.chatroomCtx[chatroomId].Users) == 0 {
-				log.Info("Chatroom will be removed - ", chatroomId)
-			}
 		}
+
 		c.mu.Unlock()
+
+		c.GetChatroomCtx(chatroomId).RemoveUser(userId)
+
+		if len(c.GetChatroomCtx(chatroomId).Users) == 0 {
+			log.Info("Chatroom will be removed - ", chatroomId)
+			// TODO: Fix this
+		}
 
 		conn.Close()
 		log.Info("Connection closed with", userTag)
@@ -108,11 +94,21 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 
 	// Subscribe to chat rooms
 	// This is the part of code taking care of SENDING MESSAGES TO ALL PEERS
-	currentConn := c.conns[conn]
 
+	c.subscribeToMsgChannels(conn, userId, userChatrooms)
+	c.incomingMessageHandler(conn, userId, chatroomId)
+
+	log.Info("Client Disconnected")
+	return nil
+}
+
+func (c *Controller) subscribeToMsgChannels(conn *websocket.Conn, userId string, userChatrooms []lib.Chatroom) {
+	log := logger.NewLogger(logger.Console, "natsSubscriptionHandler")
+	currentConn := c.conns[conn]
 	for _, room := range userChatrooms {
 		chatroomId := room.Id
-		sub, err := c.nats.Subscribe("chatroom.chat."+chatroomId, func(msg *nats.Msg) {
+		// Chat subscription
+		sub, err := c.msgChannel.Subscribe("chatroom.chat."+chatroomId, func(msg *nats.Msg) {
 			log.Info("Received Message:", string(msg.Data))
 			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
 
@@ -134,24 +130,46 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 
 		// Signalling
 		currentConn.Subscriptions = append(currentConn.Subscriptions, sub)
-		sub, err = c.nats.Subscribe("chatroom.signal.*."+chatroomId, func(msg *nats.Msg) {
-			log.Info("Received Signal:", string(msg.Data))
-			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
-
+		sub, err = c.msgChannel.Subscribe("chatroom.signal.*."+chatroomId, func(msg *nats.Msg) {
+			// --CHECK DUPLICITY--
+			data := msg.Data
+			var socketMsg lib.SocketMessage[any]
+			err := json.Unmarshal(data, &socketMsg)
 			if err != nil {
-				log.Error("Writing WebSocket[chatroom.signal.*] message:", err)
+				log.Error("json.Unmarshal", err)
+			}
+			if socketMsg.Sender == userId {
+				return
+			}
+
+			log.Info("Received Signal:", string(msg.Data))
+			err = conn.WriteMessage(websocket.TextMessage, msg.Data)
+			if err != nil {
+				log.Error("conn.WriteMessage", err)
 				return
 			}
 		})
 
 		if err != nil {
-			log.Error("NATS[chatrooms.signal.*]:", err)
+			log.Error("c.nats.Subscribe(chatroom.signal.*)", err)
 			continue
 		}
 
-		// Webrtc Signalling
-		sub, err = c.nats.Subscribe("chatroom.sfu.*."+chatroomId, func(msg *nats.Msg) {
-			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
+		// SFU Signalling
+		// chatrooms.sfu.sdp.server-request.
+		sub, err = c.msgChannel.Subscribe("chatroom.sfu.*.*."+userId, func(msg *nats.Msg) {
+			// Do not send the message back to the sender
+			data := msg.Data
+			var socketMsg lib.SocketMessage[any]
+			err := json.Unmarshal(data, socketMsg)
+			if err != nil {
+				log.Error("json.Unmarshal", err)
+			}
+			if socketMsg.Sender == userId {
+				return
+			}
+
+			err = conn.WriteMessage(websocket.TextMessage, msg.Data)
 			if err != nil {
 				log.Error("writing WebSocket[webrtc.*] Webrtc Message:", err)
 				// Remove connection from cache safely
@@ -169,263 +187,177 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 		}
 		currentConn.Subscriptions = append(currentConn.Subscriptions, sub)
 	}
+}
 
-	// Listen for messages
-	// This is the part of code taking care of HANDLING MESSAGES received from the websocket
+func (c *Controller) incomingMessageHandler(conn *websocket.Conn, userId string, chatroomId string) {
+	log := logger.NewLogger(logger.Console, "ListenMessageHandler")
 
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			log.Error("Client disconnected or read error:", err)
-			continue
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Error("Unexpected WS Close:", err)
+			}
+			break
 		}
 
 		// Parse message
-		var initMsgObj lib.SocketMessage[any]
-		err = json.Unmarshal(msg, &initMsgObj)
+		var socketMsg lib.SocketMessage[any]
+		err = json.Unmarshal(msg, &socketMsg)
 		if err != nil {
-			log.Error("Error[json.Unmarshal(initMsgObj)]:", err)
+			log.Error("json.Unmarshal(initMsgObj):", err)
 		}
-		fmt.Println("📥 Received:", string(initMsgObj.Subject))
+		log.Println("📥 Received:", string(socketMsg.Subject))
+
+		parsedMsg, err := socketMsg.Parse()
+
+		switch v := parsedMsg.(type) {
+		case lib.ChatMessage:
+			c.handleSocketChatMessage(v)
+
+		// SFU Messages are not really supposed to be sent from the client to the server
+		case lib.SFUSdpMessage:
+		case lib.SFUIceMessage:
+			payload := v.Payload
+			trickleType := payload.Type
+			if trickleType != "pub" && trickleType != "sub" {
+				log.Error("trickleType", "Invalid Trickle type, got %s", trickleType)
+			}
+			candidate := payload.Trickle
+			sigCode, err := v.SignalCode()
+			if err != nil {
+				log.Error("GetSignalCode", err)
+				continue
+			}
+			if sigCode == lib.ClientTrickle {
+				session, _ := c.sfu.GetSession(chatroomId)
+				peer := session.GetPeer(userId)
+				if trickleType == "pub" {
+					peer.Publisher().AddICECandidate(candidate)
+				}
+				if trickleType == "sub" {
+					peer.Subscriber().AddICECandidate(candidate)
+				}
+			}
+
+		case lib.SFUSdpReqmessage:
+
+		// init-ic (indiv call)
+		case lib.Signal0Message:
+			c.msgChannel.Publish(&v)
+
+		// init-gc (goup call)
+		case lib.Signal1Message:
+			c.GetChatroomCtx(chatroomId).SetOnCall(true)
+			err := c.msgChannel.Publish(&v)
+			if err != nil {
+				log.Error("Signal1Message.msgChannel.Publish", err)
+				continue
+			}
+			peerA := sfu.NewPeer(c.sfu)
+			SetupPeer(peerA, c.msgChannel, userId)
+			err = peerA.Join(chatroomId, userId)
+			if err != nil {
+				log.Error("Signal1Message.peerA.Join", err)
+				continue
+			}
+			payload := v.Payload
+			answer, err := peerA.Answer(payload.Sdp)
+			sfuPayload := lib.SdpPayload{
+				Offer: answer,
+				Type:  "pub",
+			}
+			serverAnsMsg, err := lib.NewSFUSocketMessage("server.sfu", lib.ServerAnswer+"."+userId, sfuPayload)
+			if err != nil {
+				log.Error("Signal1Message.NewSFUSocketMessage", err)
+				continue
+			}
+			err = c.msgChannel.Publish(&serverAnsMsg)
+			if err != nil {
+				log.Error("msgChannel.Publish", err)
+				continue
+			}
+
+		// ans-ic (answer call)
+		case lib.Signal2Message:
+			if err := c.AnsIcMsgHandler(v, chatroomId, userId); err != nil {
+				log.Error("AnsIcMsgHandler", err)
+				continue
+			}
+
+		// ack-ic (ack individual call)
+		case lib.Signal11Message:
+			if err = c.AckMsgHandler(v, chatroomId, userId); err != nil {
+				log.Error("AckIcMsgHandler", err)
+				continue
+			}
+
+		// end-call (end call)
+		case lib.Signal3Message:
+			// Move to asynch cleaner (sort of like a garbage collector)
+			c.GetChatroomCtx(chatroomId).SetOnCall(false)
+			for k, p := range c.GetChatroomCtx(chatroomId).CallParticipants {
+				p.Close()
+				delete(c.GetChatroomCtx(chatroomId).CallParticipants, k)
+			}
+
+		// ans-gc (answer group call)
+		case lib.Signal4Message:
+			if v.Payload.Answer == "join" {
+				sdp := v.Payload.Sdp
+				peerB := sfu.NewPeer(c.sfu)
+				SetupPeer(peerB, c.msgChannel, userId)
+				err := peerB.Join(chatroomId, userId)
+				if err != nil {
+					log.Error("peerB.Join", err)
+					continue
+				}
+				answer, err := peerB.Answer(sdp)
+				if err != nil {
+					log.Error("peerB.Answer", err)
+					continue
+				}
+				sfuPayload := lib.SdpPayload{
+					Type:  "pub",
+					Offer: answer,
+				}
+				ansMsg, err := lib.NewSFUSocketMessage("server.sfu", lib.ServerAnswer+"."+userId, sfuPayload)
+				if err != nil {
+					log.Error("Signal4Message.NewSFUSocketMessage", err)
+					continue
+				}
+				err = c.msgChannel.Publish(&ansMsg)
+				if err != nil {
+					log.Error("Signal4Message.msgChannel.Publish", err)
+					continue
+				}
+				c.GetChatroomCtx(chatroomId).AddCallParticipant(userId, peerB)
+			}
+
+			if v.Payload.Answer == "leave" {
+				c.GetChatroomCtx(chatroomId).RemoveCallParticipant(userId)
+			}
+
+		// start-stream (start stream)
+		case lib.Signal5Message:
+
+		// join-stream (join stream)
+		case lib.Signal7Message:
+
+		// leave-stream (leave stream)
+		case lib.Signal8Message:
+
+		// end-stream (end stream)
+		case lib.Signal9Message:
+
+		// remote (remote action)
+		case lib.Signal10Message:
+		}
 
 		if err != nil {
-			log.Error("Error Unmarshalling initMsgObj: ", err)
+			log.Error("socketMsg.Parse", "Could not parse socket message", err)
+			continue
 		}
 
-		// TODO: Take care of this
-		// Signal can be of alot of types
-		if strings.HasPrefix(initMsgObj.Subject, "chatrooms.signal") {
-			// Init Indiv Calls  (chatrooms.signal.init-ic.<cid>)
-			// Init Group Calls  (chatrooms.signal.init-gc.<cid>)
-			// Indiv Call Answer (chatrooms.signal.ans-ic.<cid>)
-			// End Call          (chatrooms.signal.end-call.<cid>)
-			// Join Call         (chatrooms.signal.join-call.<cid>)
-			// Leave Call        (chatrooms.signal.leave-call.<cid>)
-			// Start Stream      (chatrooms.signal.start-stream.<cid>)
-			// Join Stream       (chatrooms.signal.join-stream.<cid>)
-			// Leave Stream      (chatrooms.signal.leave-stream.<cid>)
-			// End Stream        (chatrooms.signal.end-stream.<cid>)
-			// Remote Actions    (chatrooms.signal.change-remote.<cid>)
-
-			s := strings.Split(initMsgObj.Subject, ".")
-			if len(s) != 3 {
-				log.Error("Error in msg[signal] type:")
-				continue
-			}
-			//TODO: Handle all cases of signalling
-			chatroomId := s[3]
-			signalType := s[2]
-
-			switch signalType {
-			case "init-ic":
-				// Forward to nats
-				continue
-			case "init-gc":
-				// Forward to nats
-				continue
-			case "join-ic":
-
-			case "ans-ic":
-				if userId == initMsgObj.Sender {
-					// Join the call
-					var sigAns lib.Signal2Payload
-					err := json.Unmarshal(msg, &sigAns)
-					if err != nil {
-						log.Error("Error in SignalHandler[ans-ic]->", err)
-						continue
-					}
-					if sigAns.Answer == "accept" {
-						sdpString := sigAns.Sdp
-						if sdpString == "" {
-							log.Error("Error in SignalHandler[ans-ic].accecpt->", fmt.Errorf("No SDP sent"))
-							continue
-						}
-						var sdp webrtc.SessionDescription
-						err := json.Unmarshal([]byte(sdpString), &sdp)
-						if err != nil {
-							log.Error("Error in SignalHandler[ans-ic.json-parse]->", err)
-							continue
-						}
-
-						sesh := (*c.chatroomCtx[chatroomId].Session)
-						localSession := sesh.(*sfu.SessionLocal)
-						peer := sfu.NewPeer(c.sfu)
-						peer.Join(chatroomId, userId)
-
-						answer, _ := peer.Answer(webrtc.SessionDescription{
-							Type: webrtc.SDPTypeOffer,
-							SDP:  sdp.SDP,
-						})
-
-						localSession.AddPeer(peer)
-
-					}
-					continue
-				}
-			case "ans-gc":
-			case "end-call":
-			case "start-stream":
-			case "leave-stream":
-			case "end-stream":
-			case "remote":
-			}
-
-			c.nats.Publish("chatrooms."+chatroomId, msg)
-		}
-
-		if strings.HasPrefix(initMsgObj.Subject, "chatrooms.chat") {
-			msgObj := lib.ChatMessage{}
-			s := strings.Split(initMsgObj.Subject, ".")
-
-			if len(s) < 2 {
-				log.Error("Error chat message is not correct format, got:", string(msg))
-				continue
-			}
-
-			chatroomId := s[1]
-			json.Unmarshal(msg, &msgObj)
-
-			if !ok {
-				log.Error("Failed to assert Payload as dto.ChatMessagePayload")
-				log.Error("Payload", string(msg))
-				continue
-			}
-
-			c.nats.Publish("chatrooms.chat."+chatroomId, msg)
-
-			// Store message
-			if err := c.s.StoreChatMessage(initMsgObj.Sender, chatroomId, msgObj.Payload); err != nil {
-				log.Error("Error storing chat message:", err)
-				continue
-			}
-		}
-
-		// Type - chatrooms.sfu.[offer].[id]
-		if strings.HasPrefix(initMsgObj.Subject, "chatrooms.sfu.") {
-			s := strings.Split(initMsgObj.Subject, ".")
-			if len(s) != 3 {
-				log.Error("Error in msg[webrtc] type:")
-				continue
-			}
-			chatroomId := s[2]
-			c.nats.Publish("chatrooms."+chatroomId, msg)
-		}
-
-		if strings.HasPrefix(initMsgObj.Subject, "") {
-			// The message form will be - stream.[type].[chatroomId]
-			// DEBUG
-			// log.Info("Message received in stream socket subject")
-
-			sp := strings.Split(initMsgObj.Subject, ".")
-			if len(sp) != 3 {
-				log.Error("Error in msg[subject] length:(not 3)")
-				continue
-			}
-			msgType := sp[1]
-			chatroomId := sp[2]
-			userId := initMsgObj.Sender
-			if userId == "" {
-				log.Error("No senderId provided in message")
-				log.Error("Sender", string(msg))
-				continue
-			}
-
-			if msgType == "answer" {
-				payloadMap, ok := initMsgObj.Payload.(map[string]any)
-				if !ok {
-					log.Error("Payload is not a valid map[string]interface{}")
-					continue
-				}
-
-				jsonBytes, err := json.Marshal(payloadMap)
-				if err != nil {
-					log.Error("Failed to marshal payload map to JSON:", err)
-					continue
-				}
-
-				var desc webrtc.SessionDescription
-				err = json.Unmarshal(jsonBytes, &desc)
-				if err != nil {
-					log.Error("Failed to unmarshal JSON to SessionDescription:", err)
-					continue
-				}
-
-				c.mu.Lock()
-				connVal, ok := c.conns[conn]
-				c.mu.Unlock()
-				if !ok {
-					log.Error("Error: reading connVal c.conns[conn]:")
-					continue
-				}
-				err = connVal.StreamConfig.PeerConnection.SetRemoteDescription(desc)
-				if err != nil {
-					log.Error("Error setting remote description:", err)
-					continue
-				}
-				log.Info("Remote description set for", userId, ":", chatroomId)
-				log.Info("Webrtc Connection Established with", userId, ":", chatroomId)
-			}
-			if msgType == "ice" {
-				payloadMap, ok := initMsgObj.Payload.(map[string]any)
-				if !ok {
-					log.Error("Ice Candidate payload is not of type map[string]any")
-					continue
-				}
-
-				jsonBytes, err := json.Marshal(payloadMap)
-				if err != nil {
-					log.Error("Failed to marshal payload map to JSON:", err)
-					continue
-				}
-
-				var _candidate webrtc.ICECandidateInit
-				err = json.Unmarshal(jsonBytes, &_candidate)
-				if err != nil {
-					log.Error("Failed to unmarshal JSON to ICECandidateInit:", err)
-					continue
-				}
-
-				c.mu.Lock()
-				c.conns[conn].StreamConfig.PeerConnection.AddICECandidate(_candidate)
-				c.mu.Unlock()
-				// log.Info("ICE candidate added for", userId, ":", chatroomId)
-			}
-
-			if msgType == "disconnected" {
-				log.Info("User", userId, "disconnected from", chatroomId)
-				break
-			}
-
-			// This is the old version of stopping stream
-			// if msgType == "stop-stream" {
-			// 	log.Info("Stopping Stream")
-
-			// 	err := browserManager.Pipeline.SetState(gst.StateNull)
-			// 	if err != nil {
-			// 		log.Error("Error stopping stream[Pipeline.SetState(gst.StateNull)]", err)
-			// 	}
-
-			// 	userIds, err := c.s.Store.GetUsersByChatroomId(c.s.Ctx, chatroomId)
-			// 	if err != nil {
-			// 		log.Error("Error getting users by chatroom id:", err)
-			// 	}
-
-			// 	c.mu.Lock()
-			// 	for _, conn := range c.conns {
-			// 		if lib.Contains(userIds, conn.UserId) {
-			// 			conn.StreamConfig.PeerConnection.Close()
-			// 		}
-			// 	}
-			// 	c.mu.Unlock()
-
-			// 	c.chatroomCtx[chatroomId].cancel()
-			// 	delete(c.chatroomCtx, chatroomId)
-			// 	log.Info("Stream Ended")
-			// 	break
-			// }
-		}
 	}
-
-	log.Info("Client Disconnected")
-	return nil
 }

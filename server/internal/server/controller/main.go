@@ -2,12 +2,12 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"sideDesert/shiba/internal/server/controller/common"
 	"sideDesert/shiba/internal/server/lib"
 	"sideDesert/shiba/internal/server/services"
-	vb "sideDesert/shiba/internal/vbrowser"
 	"sync"
 
 	"github.com/gorilla/mux"
@@ -16,43 +16,41 @@ import (
 	"github.com/pion/ion-sfu/pkg/sfu"
 )
 
-type Controller struct {
-	s           *services.Service
-	nats        *nats.Conn
-	conns       map[*websocket.Conn]*lib.ConnMap
-	chatroomCtx map[string]ChatroomCtx
-	mu          sync.Mutex
-	sfu         *sfu.SFU
+type MsgChannel struct {
+	nats *nats.Conn
 }
 
-type ChatroomCtx struct {
-	Users              map[string]*websocket.Conn
-	BrowserManager     *vb.VbrowserManager
-	CallParticipants   map[string]*sfu.Peer
-	StreamParticipants map[string]*sfu.PeerLocal
-	Session            *sfu.Session
-	Streaming          bool
-	Port               int
-	ctx                context.Context
-	cancel             context.CancelFunc
-}
-
-func (c *Controller) NewChatroomCtx(ctx context.Context, cid string, port int) ChatroomCtx {
-	ctx, cancel := context.WithCancel(ctx)
-
-	session, _ := c.sfu.GetSession(cid)
-
-	return ChatroomCtx{
-		ctx:                ctx,
-		cancel:             cancel,
-		Streaming:          true,
-		Port:               port,
-		BrowserManager:     vb.NewVbManager(port),
-		Users:              make(map[string]*websocket.Conn),
-		CallParticipants:   make(map[string]*sfu.Peer),
-		StreamParticipants: make(map[string]*sfu.PeerLocal),
-		Session:            &session,
+func (p *MsgChannel) Publish(msg lib.Msg) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
 	}
+	return p.nats.Publish(msg.Subj(), data)
+}
+
+func (p *MsgChannel) Subscribe(subj string, cb nats.MsgHandler) (*nats.Subscription, error) {
+	return p.nats.Subscribe(subj, cb)
+}
+
+type Controller struct {
+	s              *services.Service
+	msgChannel     *MsgChannel
+	conns          map[*websocket.Conn]*lib.ConnMap
+	chatroomCtxMap map[string]*ChatroomCtx
+	mu             sync.Mutex
+	sfu            *sfu.SFU
+}
+
+func (c *Controller) GetChatroomCtx(chatroomId string) *ChatroomCtx {
+	c.mu.Lock()
+	a, ok := c.chatroomCtxMap[chatroomId]
+
+	if !ok {
+		chatroomCtx := c.NewChatroomCtx(context.Background(), chatroomId, -1)
+		c.chatroomCtxMap[chatroomId] = chatroomCtx
+	}
+	c.mu.Unlock()
+	return a
 }
 
 // TODO: IMplement this
@@ -66,11 +64,11 @@ func (c *Controller) CloseDbConn(ctx context.Context) {
 
 func NewController(s *services.Service, nats *nats.Conn) *Controller {
 	return &Controller{
-		s:           s,
-		nats:        nats,
-		conns:       make(map[*websocket.Conn]*lib.ConnMap),
-		chatroomCtx: make(map[string]ChatroomCtx),
-		sfu:         sfu.NewSFU(sfu.Config{}),
+		s:              s,
+		msgChannel:     &MsgChannel{nats: nats},
+		conns:          make(map[*websocket.Conn]*lib.ConnMap),
+		chatroomCtxMap: make(map[string]*ChatroomCtx),
+		sfu:            sfu.NewSFU(sfu.Config{}),
 	}
 }
 

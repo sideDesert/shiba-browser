@@ -1,11 +1,29 @@
 import { type SocketMessage } from "./message";
 
-const iceSubject = "chatrooms.sfu.ice.<cid>";
-const sdpSubject = "chatrooms.sfu.sdp.<cid>";
+export const SfuSignal = {
+  serverAnswer: "server-answer",
+  serverOffer: "server-offer",
+  serverRequest: "server-request",
+  serverTrickle: "server-trickle",
+  ClientTrickle: "client-trickle",
+} as const;
+//_type => server-answer, server-offer, sever-request
+const iceSubject = "chatrooms.sfu.ice.<sigcode>.<uid>";
+const sdpSubject = "chatrooms.sfu.sdp.<sigcode>.<uid>";
 const sender = "<uid>";
 
-type IcePayload = Record<string, string>;
-type SdpPayload = RTCSessionDescriptionInit;
+export type IcePayload = {
+  trickle: RTCIceCandidateInit;
+  type: "pub" | "sub";
+};
+export type SdpPayload = {
+  offer: RTCSessionDescriptionInit;
+  type: "pub" | "sub";
+};
+type b = RTCSessionDescription;
 
-type IceSfuMessage = SocketMessage<IcePayload>;
-type SdpSfuMessage = SocketMessage<SdpPayload>;
+export type RequestPayload = {};
+
+export type IceSfuMessage = SocketMessage<IcePayload>;
+export type SdpSfuMessage = SocketMessage<SdpPayload>;
+export type ReqSfuMessage = SocketMessage<RequestPayload>;
