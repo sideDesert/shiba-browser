@@ -68,7 +68,7 @@ const (
 )
 
 func (l *writerLogger) Info(args ...any) {
-	l.log("ℹ️INFO", blue, fmt.Sprint(args...))
+	l.log("💬INFO", blue, fmt.Sprint(args...))
 }
 
 func (l *writerLogger) Success(args ...any) {

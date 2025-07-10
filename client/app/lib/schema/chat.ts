@@ -1,4 +1,6 @@
 import { type SocketMessage } from "./message";
+import { z } from "zod";
+
 export type ChatPayload = {
   id: string;
   sender_name: string;

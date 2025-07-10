@@ -3,15 +3,8 @@ import { InteractivityPad } from "@/components/interactivity-pad";
 import { get } from "@/lib/utils";
 import { Anchor, Phone, PhoneOff } from "lucide-react";
 import type { Route } from "./+types/home";
-import {
-  createSocket,
-  NewChatMessage,
-  NewWsChatMessage,
-  NewWebrtcMessage,
-} from "@/lib/chat";
-import { type ChatMessagePayload } from "@/lib/types";
 
-import type { ChatMessage, Message, RemoteResponse, User } from "@/lib/types";
+import type { RemoteResponse, User, ClientChatMessage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState, useRef } from "react";
 import { Chat } from "@/components/chat";
@@ -21,6 +14,41 @@ import { useParams } from "react-router";
 import { WS_URL } from "@/root";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
+import {
+  SocketMessageBuilder,
+  SocketMessageHeader,
+} from "@/lib/socket-message-builder";
+import type { ChatMessage, ChatPayload } from "@/lib/schema/chat";
+import {
+  SfuSignal,
+  type IcePayload,
+  type SdpPayload,
+  SfuType,
+} from "@/lib/schema/sfu";
+import {
+  signal0,
+  signal1,
+  signal2,
+  signal3,
+  signal4,
+  signal5,
+  signal7,
+  signal8,
+  signal9,
+  signal10,
+  signal11,
+  type Signal11Payload,
+  type Signal2Payload,
+  type Signal0Payload,
+  type Signal3Payload,
+} from "@/lib/schema/signal";
+import {
+  ShibaMessageManager,
+  type SideEffects,
+} from "@/lib/socket-message-manager.ts/main";
+import { IncomingCallDialog } from "@/components/call-dialog";
+import { CompactCallStatus } from "@/components/compact-call-status";
+import { CallStatusWidget } from "@/components/call-status";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -32,13 +60,19 @@ export function meta({}: Route.MetaArgs) {
 export default function Page() {
   const params = useParams<{ id: string }>();
   const chatroomId = params?.id!;
-  const streamPeerConnection = useRef<RTCPeerConnection | null>(null);
-  const streamIceCandidate = useRef<Array<RTCIceCandidate>>([]);
+  // const streamPeerConnection = useRef<RTCPeerConnection | null>(null);
+  // const streamIceCandidate = useRef<Array<RTCIceCandidate>>([]);
   const queryClient = useQueryClient();
 
+  // const peerVideoRTCConn = useRef(new SFUConnection());
+  // const sfuStreamRTCConn = useRef(new SFUConnection());
+  const shiba = useRef<ShibaMessageManager | null>(null);
+
   const [input, setInput] = useState<string>("");
-  // const [socket, setSocket] = useState<WebSocket | null>(null);
-  const socket = useRef<WebSocket | null>(null);
+  const [callStatus, setCallStatus] = useState({
+    incoming: false,
+    status: "stale",
+  });
   const [userData, userDataIsLoading] = useDAL<User>(DAL["auth"]);
   const userId = userData?.user_id;
   const [chatHistoryFn, chatHistoryKey] = DAL["chatroom"]["history"];
@@ -53,21 +87,6 @@ export default function Page() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       vbrowserStream.current = new MediaStream();
-
-      streamPeerConnection.current = new RTCPeerConnection({
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:stun1.l.google.com:19302" },
-          { urls: "stun:stun2.l.google.com:19302" },
-        ],
-        iceCandidatePoolSize: 10,
-      });
-      console.log(streamPeerConnection);
-
-      streamPeerConnection.current.ontrack = (event) => {
-        const track = event.track;
-        vbrowserStream.current!.addTrack(track);
-      };
     }
   }, []);
 
@@ -88,7 +107,7 @@ export default function Page() {
   const chk = [...chatHistoryKey, chatroomId];
   // WEBRTC
   // Track WebRTC setup to prevent infinite loop
-  const rtcPeerConn = useRef<RTCPeerConnection | null>(null);
+
   const candidates = useRef<Array<RTCIceCandidate>>([]);
 
   const [localVideoStream, setLocalVideoStream] =
@@ -110,23 +129,25 @@ export default function Page() {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  function getOrCreatePeerConnection() {
-    if (!rtcPeerConn.current) {
-      rtcPeerConn.current = new RTCPeerConnection();
-    }
+  // function getOrCreateSubPeerConnection() {
+  //   if (!subRTCPeerConn.current) {
+  //     subRTCPeerConn.current = new RTCPeerConnection();
+  //   }
 
-    return rtcPeerConn.current;
-  }
-  function closeRTCPeerConnection() {
-    if (rtcPeerConn.current) {
-      rtcPeerConn.current.close();
-      rtcPeerConn.current = null;
-    }
+  //   return subRTCPeerConn.current;
+  // }
 
-    if (candidates.current) {
-      candidates.current = [];
-    }
-  }
+  // function closeRTCPeerConnection() {
+  //   if (subRTCPeerConn.current) {
+  //     subRTCPeerConn.current.close();
+  //     subRTCPeerConn.current = null;
+  //   }
+
+  //   if (candidates.current) {
+  //     candidates.current = [];
+  //   }
+  // }
+
   function closeRemoteVideoStream() {
     if (remoteVideoStream) {
       remoteVideoStream.getTracks().forEach((track) => {
@@ -149,7 +170,7 @@ export default function Page() {
   function endCall() {
     closeLocalVideoStream();
     closeRemoteVideoStream();
-    closeRTCPeerConnection();
+    // closeRTCPeerConnection();
   }
 
   useEffect(() => {
@@ -162,7 +183,7 @@ export default function Page() {
   useEffect(() => {
     if (remoteVideoRef.current && remoteVideoStream) {
       remoteVideoRef.current.srcObject = remoteVideoStream;
-      console.log("LOCAL VIDEO", localVideoStream);
+      console.log("REMOTE VIDEO", remoteVideoStream);
     }
   }, [remoteVideoStream]);
 
@@ -178,314 +199,228 @@ export default function Page() {
     enabled: !userDataIsLoading && chatroomId !== "",
   });
 
+  const callbackMap: SideEffects = {
+    addChatMessage: (msg: ChatMessage) => {
+      const nmsg: ClientChatMessage = {
+        chatroom_id: chatroomId,
+        content: msg.payload.content,
+        created_at: msg.payload.created_at,
+        id: crypto.randomUUID(),
+        sender: msg.sender,
+        sender_name: userData?.username ?? "",
+      };
+      queryClient.setQueryData(chk, (p: ClientChatMessage[] | undefined) => {
+        return [nmsg, ...(p || [])];
+      });
+    },
+    setLocalVideoStream: (stream) => {
+      setLocalVideoStream(stream);
+    },
+    setRemoteVideoStream: (stream) => {
+      setRemoteVideoStream(stream);
+    },
+    setIsIncomingCall: (val: boolean) => {
+      setCallStatus((prev) => ({
+        ...prev,
+        incoming: val,
+      }));
+    },
+    setIsOutgoingCall: (val: boolean) => {
+      setCallStatus({
+        incoming: false,
+        status: "connected",
+      });
+    },
+  };
+
   // WebSocket connection setup - only runs when userData changes
   useEffect(() => {
-    async function messageHandler(msg: Message<unknown>) {
-      const sub = msg.subject;
-      if (!socket.current) return;
-      if (!userId) return;
+    //   // THIS IS JUST FOR VBROWSER
+    //   // if (sub.startsWith("stream")) {
+    //   //   // THIS USES THE FORMAT - stream.<message-type>.<chatroom-id>.<user-id>
+    //   //   if (!streamPeerConnection.current) return;
+    //   //   const s = sub.split(".");
+    //   //   if (s.length !== 4) {
+    //   //     console.error("Invalid message format", s);
+    //   //     return;
+    //   //   }
+    //   //   const msgType = sub.split(".")[1];
+    //   //   const _cid = sub.split(".")[2];
+    //   //   const _uid = sub.split(".")[3];
 
-      if (sub.startsWith("chat")) {
-        const chatroomId = msg.subject.split(".")[1];
-        if (!chatroomId || chatroomId == "") {
-          console.error("No chatroom Id in message subject", msg.subject);
-          return;
-        }
-        const typedMsg = msg as Message<ChatMessagePayload>;
-        if (msg.sender !== userId) {
-          const chatMsg = NewChatMessage(
-            msg.sender,
-            typedMsg.payload.sender_name,
-            typedMsg.payload.content,
-            chatroomId
-          );
-          console.log("NEW MESSAGE:", chatMsg);
-          queryClient.setQueryData(chk, (p: ChatMessage[] | undefined) => {
-            return [chatMsg, ...(p || [])];
-          });
-        }
-      }
+    //   //   if (_cid !== chatroomId) {
+    //   //     console.error("Invalid chatroom ID From Server");
+    //   //     return;
+    //   //   }
 
-      if (sub.startsWith("webrtc")) {
-        const msgType = msg.subject.split(".")[1];
-        if (userId === msg.sender) return;
+    //   //   if (_uid !== userData?.user_id) {
+    //   //     console.error("Invalid user ID From Server");
+    //   //     console.log(msg);
+    //   //     return;
+    //   //   }
 
-        if (msgType === "disconnect") {
-          endCall();
-        }
+    //   //   if (msgType === "offer") {
+    //   //     const offer = msg.payload as string;
+    //   //     if (!streamPeerConnection) {
+    //   //       return;
+    //   //     }
+    //   //     console.log("Offer Received:", msg);
+    //   //     try {
+    //   //       // THIS IS FOR THE STREAM
+    //   //       await streamPeerConnection.current?.setRemoteDescription({
+    //   //         type: "offer",
+    //   //         sdp: offer,
+    //   //       });
+    //   //     } catch (err) {
+    //   //       console.log("OFFER:", offer);
+    //   //       console.error("Failed to set remote description", err);
+    //   //     }
+    //   //     console.log("Stream Remote Offer set as Remote Description");
 
-        // THIS IS FOR THE CALLER
-        if (msgType === "answer") {
-          if (rtcPeerConn.current && msg.payload) {
-            await rtcPeerConn.current!.setRemoteDescription(
-              msg.payload as RTCSessionDescription
-            );
-            console.log("Session Established!");
-          }
+    //   //     streamPeerConnection.current!.onicecandidate = (event) => {
+    //   //       if (event.candidate) {
+    //   //         try {
+    //   //           socket.current?.send(
+    //   //             JSON.stringify({
+    //   //               sender: userData?.user_id,
+    //   //               subject: "stream.ice." + chatroomId,
+    //   //               payload: event.candidate,
+    //   //             } as Message<typeof event.candidate>)
+    //   //           );
+    //   //         } catch (err) {
+    //   //           console.error("Couldn't send ICE candidate", err);
+    //   //           streamIceCandidate.current.push(event.candidate);
+    //   //         }
+    //   //       }
+    //   //     };
 
-          console.log("ANSWER", msg);
-        }
+    //   //     streamPeerConnection.current.onicegatheringstatechange = (event) => {
+    //   //       const pc = streamPeerConnection.current;
+    //   //       if (!pc) return;
+    //   //       if (pc.iceGatheringState === "complete") {
+    //   //         streamIceCandidate.current.forEach((candidate) => {
+    //   //           try {
+    //   //             socket.current?.send(
+    //   //               JSON.stringify({
+    //   //                 sender: userData?.user_id,
+    //   //                 subject: "stream.ice." + chatroomId,
+    //   //                 payload: candidate,
+    //   //               } as Message<typeof candidate>)
+    //   //             );
+    //   //           } catch (err) {
+    //   //             console.error("Couldn't send ICE candidate", err);
+    //   //           }
+    //   //         });
+    //   //       }
+    //   //     };
 
-        // THIS IS FOR THE CALLEE
-        if (msgType === "ice") {
-          candidates.current = [
-            ...candidates.current,
-            msg.payload as RTCIceCandidate,
-          ];
-          if (rtcPeerConn.current && rtcPeerConn.current.localDescription) {
-            await rtcPeerConn.current.addIceCandidate(
-              msg.payload as RTCIceCandidate
-            );
-          }
-        }
+    //   //     streamPeerConnection.current.onconnectionstatechange = () => {
+    //   //       console.log(
+    //   //         "Connection STATUS: ",
+    //   //         streamPeerConnection.current?.connectionState
+    //   //       );
+    //   //       setStreamConnectionStatus(
+    //   //         streamPeerConnection.current?.connectionState ?? "disconnected"
+    //   //       );
+    //   //       if (streamPeerConnection.current?.connectionState === "connected") {
+    //   //         const video = vref.current?.querySelector("video");
 
-        // THIS IS FOR THE CALLEE
-        if (msgType === "sdp") {
-          const stream = await getMediaStream();
-          if (!stream) {
-            console.error("No stream found");
-            return;
-          }
-          setLocalVideoStream(stream);
+    //   //         if (!video) {
+    //   //           console.error("no video element in vref");
+    //   //           return;
+    //   //         }
 
-          let conn = getOrCreatePeerConnection();
+    //   //         video.srcObject = new MediaStream(
+    //   //           streamPeerConnection.current
+    //   //             ?.getReceivers()
+    //   //             .map((r) => r.track)
+    //   //             .filter(Boolean)
+    //   //         );
+    //   //         setShowH1(false);
+    //   //       }
+    //   //     };
 
-          conn.onicecandidate = (event) => {
-            if (event.candidate && socket.current) {
-              console.log("REMOTE sending ICE candidate");
-              socket.current.send(
-                JSON.stringify({
-                  subject: "chatrooms.sfu.ice." + chatroomId,
-                  sender: userData?.user_id,
-                  payload: event.candidate,
-                })
-              );
-            }
-          };
+    //   //     const ans = await streamPeerConnection.current?.createAnswer();
+    //   //     console.log("Created Answer to offer for Stream Peer Connection");
 
-          conn.ontrack = (e) => {
-            if (!remoteVideoStream) {
-              const newStream = new MediaStream();
-              e.track.onended = () => {
-                console.log("Remote track ended:", e.track.kind);
-              };
-              newStream.addTrack(e.track);
-              setRemoteVideoStream(newStream);
-            } else {
-              remoteVideoStream.addTrack(e.track);
-              setRemoteVideoStream(
-                new MediaStream(remoteVideoStream.getTracks())
-              );
-            }
-          };
+    //   //     await streamPeerConnection.current?.setLocalDescription(ans);
+    //   //     console.log("Set Answer as Local Description");
 
-          try {
-            // THIS IS FOR THE CALLEE
-            await conn.setRemoteDescription(
-              msg.payload as RTCSessionDescription
-            );
-            // Add Candidates
-            for (const candidate of candidates.current) {
-              await conn.addIceCandidate(candidate).catch(console.error);
-            }
+    //   //     console.log("Peer Connection Handler", streamPeerConnection);
 
-            stream.getTracks().forEach((el) => {
-              conn.addTrack(el, stream);
-            });
+    //   //     socket.current?.send(
+    //   //       JSON.stringify({
+    //   //         sender: userData?.user_id,
+    //   //         subject: "stream.answer." + chatroomId,
+    //   //         payload: ans,
+    //   //       })
+    //   //     );
+    //   //   }
 
-            rtcPeerConn.current = conn;
-            const answer = await conn.createAnswer();
-            await conn.setLocalDescription(answer);
-
-            if (socket.current) {
-              const msg = JSON.stringify({
-                subject: "webrtc.answer." + chatroomId,
-                sender: userData?.user_id,
-                payload: answer,
-              });
-              console.log("ANSWER:", msg);
-              socket.current.send(msg);
-            }
-          } catch (err) {
-            console.log("Error, Message Payload: ", msg.payload);
-            console.error(err);
-          }
-        }
-      }
-
-      // THIS IS JUST FOR VBROWSER
-      if (sub.startsWith("stream")) {
-        // THIS USES THE FORMAT - stream.<message-type>.<chatroom-id>.<user-id>
-        if (!streamPeerConnection.current) return;
-        const s = sub.split(".");
-        if (s.length !== 4) {
-          console.error("Invalid message format", s);
-          return;
-        }
-        const msgType = sub.split(".")[1];
-        const _cid = sub.split(".")[2];
-        const _uid = sub.split(".")[3];
-
-        if (_cid !== chatroomId) {
-          console.error("Invalid chatroom ID From Server");
-          return;
-        }
-
-        if (_uid !== userData?.user_id) {
-          console.error("Invalid user ID From Server");
-          console.log(msg);
-          return;
-        }
-
-        if (msgType === "offer") {
-          const offer = msg.payload as string;
-          if (!streamPeerConnection) {
-            return;
-          }
-          console.log("Offer Received:", msg);
-          try {
-            // THIS IS FOR THE STREAM
-            await streamPeerConnection.current?.setRemoteDescription({
-              type: "offer",
-              sdp: offer,
-            });
-          } catch (err) {
-            console.log("OFFER:", offer);
-            console.error("Failed to set remote description", err);
-          }
-          console.log("Stream Remote Offer set as Remote Description");
-
-          streamPeerConnection.current!.onicecandidate = (event) => {
-            if (event.candidate) {
-              try {
-                socket.current?.send(
-                  JSON.stringify({
-                    sender: userData?.user_id,
-                    subject: "stream.ice." + chatroomId,
-                    payload: event.candidate,
-                  } as Message<typeof event.candidate>)
-                );
-              } catch (err) {
-                console.error("Couldn't send ICE candidate", err);
-                streamIceCandidate.current.push(event.candidate);
-              }
-            }
-          };
-
-          streamPeerConnection.current.onicegatheringstatechange = (event) => {
-            const pc = streamPeerConnection.current;
-            if (!pc) return;
-            if (pc.iceGatheringState === "complete") {
-              streamIceCandidate.current.forEach((candidate) => {
-                try {
-                  socket.current?.send(
-                    JSON.stringify({
-                      sender: userData?.user_id,
-                      subject: "stream.ice." + chatroomId,
-                      payload: candidate,
-                    } as Message<typeof candidate>)
-                  );
-                } catch (err) {
-                  console.error("Couldn't send ICE candidate", err);
-                }
-              });
-            }
-          };
-
-          streamPeerConnection.current.onconnectionstatechange = () => {
-            console.log(
-              "Connection STATUS: ",
-              streamPeerConnection.current?.connectionState
-            );
-            setStreamConnectionStatus(
-              streamPeerConnection.current?.connectionState ?? "disconnected"
-            );
-            if (streamPeerConnection.current?.connectionState === "connected") {
-              const video = vref.current?.querySelector("video");
-
-              if (!video) {
-                console.error("no video element in vref");
-                return;
-              }
-
-              video.srcObject = new MediaStream(
-                streamPeerConnection.current
-                  ?.getReceivers()
-                  .map((r) => r.track)
-                  .filter(Boolean)
-              );
-              setShowH1(false);
-            }
-          };
-
-          const ans = await streamPeerConnection.current?.createAnswer();
-          console.log("Created Answer to offer for Stream Peer Connection");
-
-          await streamPeerConnection.current?.setLocalDescription(ans);
-          console.log("Set Answer as Local Description");
-
-          console.log("Peer Connection Handler", streamPeerConnection);
-
-          socket.current?.send(
-            JSON.stringify({
-              sender: userData?.user_id,
-              subject: "stream.answer." + chatroomId,
-              payload: ans,
-            })
-          );
-        }
-
-        if (msgType === "ice") {
-          const ice = msg.payload as RTCIceCandidate;
-          if (!streamPeerConnection) {
-            return;
-          }
-          await streamPeerConnection.current?.addIceCandidate(ice);
-          console.log("Added Stream Remote ICE Candidate");
-        }
-      }
-    }
+    //   //   if (msgType === "ice") {
+    //   //     const ice = msg.payload as RTCIceCandidate;
+    //   //     if (!streamPeerConnection) {
+    //   //       return;
+    //   //     }
+    //   //     await streamPeerConnection.current?.addIceCandidate(ice);
+    //   //     console.log("Added Stream Remote ICE Candidate");
+    //   //   }
+    //   // }
+    // }
 
     if (
-      userData &&
+      userId &&
+      userId !== "" &&
       chatroomId &&
       chatroomId !== "" &&
       typeof window !== "undefined"
     ) {
-      socket.current = createSocket(
-        WS_URL + "?cid=" + chatroomId,
-        messageHandler
+      const wsUrl = WS_URL + "?cid=" + chatroomId;
+      shiba.current = new ShibaMessageManager(
+        wsUrl,
+        userId,
+        chatroomId,
+        callbackMap
       );
+
+      shiba.current.conns.vc.sub.ontrack = (track) => {
+        const stream = track.streams[0];
+        setRemoteVideoStream(stream);
+      };
     }
 
     return () => {
-      if (socket.current) {
-        socket.current.close();
-        rtcPeerConn.current = null;
+      if (shiba.current) {
+        shiba.current.close();
       }
     };
-  }, [userId, chatroomId, queryClient]);
-
-  useEffect(() => {
-    console.group("TESTING");
-    console.log(userId);
-    console.log(chatroomId);
-    console.log(queryClient);
-    console.groupEnd();
   }, [userId, chatroomId, queryClient]);
 
   function onSendMessage(e: React.MouseEvent<HTMLElement>) {
     e.preventDefault();
     const senderName = userData?.name!;
-    const senderId = userData?.user_id!;
 
-    if (chatroomId !== "" && socket) {
-      const wsMsg = NewWsChatMessage(senderId, senderName, input, chatroomId);
-      const localMsg = NewChatMessage(senderId, senderName, input, chatroomId);
+    if (chatroomId !== "" && shiba.current && userId !== "" && !!userId) {
+      // const wsMsg = NewWsChatMessage(senderId, senderName, input, chatroomId);
+      const wsMsg = new SocketMessageBuilder();
 
-      socket.current?.send(JSON.stringify(wsMsg));
+      wsMsg.setSender(userId);
+      wsMsg.setCid(chatroomId);
+      wsMsg.setHeader(SocketMessageHeader.chat);
+      const payload: ChatPayload = {
+        sender_name: senderName,
+        content: input,
+        created_at: new Date().toISOString(),
+        id: crypto.randomUUID(),
+      };
+      wsMsg.setPayload(payload);
+      const localMsg = wsMsg.toChatMessage(chatroomId);
 
-      queryClient.setQueryData(chk, (p: ChatMessagePayload[] | undefined) => {
+      // const localMsg = NewChatMessage(senderId, senderName, input, chatroomId);
+
+      shiba.current.send(wsMsg.build());
+
+      queryClient.setQueryData(chk, (p: ClientChatMessage[] | undefined) => {
         return [localMsg, ...(p || [])];
       });
     } else {
@@ -504,57 +439,86 @@ export default function Page() {
   }, []);
 
   async function initiateVideoCall() {
-    if (socket.current && userId) {
-      const stream = await getMediaStream();
-      if (!stream) {
-        console.error("No media stream available");
-        return;
-      }
-      setLocalVideoStream(stream);
-      if (!rtcPeerConn.current) {
-        const conn = await initRTCPeerConnection(
-          userData?.user_id!,
-          chatroomId,
-          socket.current,
-          stream
-        );
-        if (!conn) {
-          console.error("Initiator RTC Peer Connection Could not be created");
-          return;
-        }
-        console.log("RTC Peer Connection Created");
+    if (shiba.current && userId) {
+      // const stream = await getMediaStream();
+      // if (!stream) {
+      //   console.error("No media stream available");
+      //   return;
+      // }
+      // setLocalVideoStream(stream);
+      // stream.getTracks().forEach((track) => {
+      //   shiba.current!.conns.vc.pub.addTrack(track, stream);
+      // });
+      setCallStatus({
+        incoming: false,
+        status: "calling",
+      });
 
-        rtcPeerConn.current = conn;
+      const initIcMsg = new SocketMessageBuilder();
+      initIcMsg.setSender(userId);
+      initIcMsg.setHeader(SocketMessageHeader.signal);
+      initIcMsg.setCid(chatroomId);
+      //TODO: Actually we gotta decide if this is a friend or a groupchat
+      initIcMsg.setType(signal0);
+      const payload: Signal0Payload = {};
+      initIcMsg.setPayload(payload);
+      console.log(initIcMsg.build());
+      shiba.current.send(initIcMsg.build());
 
-        if (remoteStream.current) {
-          conn.ontrack = (e) => {
-            console.log("Initiator received remote track:", e.track.kind);
-            remoteStream.current!.addTrack(e.track);
-            setRemoteVideoStream(remoteStream.current);
-            console.log(
-              "Remote stream now has tracks:",
-              remoteStream
-                .current!.getTracks()
-                .map((t) => t.kind)
-                .join(",")
-            );
-          };
-        }
-      }
+      shiba.current.conns.vc.sub.ontrack = (e) => {
+        remoteStream.current!.addTrack(e.track);
+        setRemoteVideoStream(remoteStream.current);
+      };
+
+      // if (!subRTCPeerConn.current) {
+      //   const conn = await initRTCPeerConnection(
+      //     userData?.user_id!,
+      //     chatroomId,
+      //     socket.current,
+      //     stream
+      //   );
+      //   if (!conn) {
+      //     console.error("Initiator RTC Peer Connection Could not be created");
+      //     return;
+      //   }
+      //   console.log("RTC Peer Connection Created");
+
+      //   subRTCPeerConn.current = conn;
+
+      //   if (remoteStream.current) {
+      //     conn.ontrack = (e) => {
+      //       console.log("Initiator received remote track:", e.track.kind);
+      //       remoteStream.current!.addTrack(e.track);
+      //       setRemoteVideoStream(remoteStream.current);
+      //       console.log(
+      //         "Remote stream now has tracks:",
+      //         remoteStream
+      //           .current!.getTracks()
+      //           .map((t) => t.kind)
+      //           .join(",")
+      //       );
+      //     };
+      //   }
+      // }
     }
   }
 
   function stopVideoCall() {
     endCall();
-    if (socket && userData) {
-      socket.current?.send(
-        JSON.stringify({
-          subject: "webrtc.disconnect." + chatroomId,
-          sender: userData.user_id,
-          payload: { message: "Call Ended" },
-        })
-      );
+    if (shiba.current && userData && userId && userId !== "") {
+      const msg = new SocketMessageBuilder();
+      msg.setCid(chatroomId);
+      msg.setSender(userId);
+      msg.setHeader(SocketMessageHeader.signal);
+      msg.setType(signal3);
+      const payload: Signal3Payload = {};
+      msg.setPayload(payload);
+      shiba.current?.send(msg.build());
     }
+    setCallStatus({
+      incoming: false,
+      status: "stale",
+    });
   }
 
   function IHaveRemote() {
@@ -563,6 +527,25 @@ export default function Page() {
 
   return (
     <div className="relative flex flex-col mr-8 h-full px-2">
+      <IncomingCallDialog
+        isOpen={callStatus.incoming}
+        onAnswer={() => {
+          console.log("Accepted");
+          setCallStatus({
+            incoming: false,
+            status: "connected",
+          });
+          shiba.current?.acceptCall();
+        }}
+        onDecline={() => {
+          console.log("Declined");
+          setCallStatus({
+            incoming: false,
+            status: "stale",
+          });
+          shiba.current?.rejectCall();
+        }}
+      />
       {showH1 && (
         <h1 className="text-3xl block font-semibold py-4">Chat Stream</h1>
       )}
@@ -577,7 +560,7 @@ export default function Page() {
               <InteractivityPad
                 userId={userId ?? ""}
                 chatroomId={chatroomId}
-                socket={socket.current}
+                socket={shiba.current}
                 handleStartStream={async () => {
                   setShowH1(false);
                   console.log("Starting Stream...");
@@ -586,13 +569,11 @@ export default function Page() {
                   setShowH1(true);
                   console.log("Stopping Stream...");
 
-                  socket.current?.send(
-                    JSON.stringify({
-                      sender: userData?.user_id,
-                      subject: "stream.stop-stream." + chatroomId,
-                      payload: "",
-                    })
-                  );
+                  shiba.current?.send({
+                    sender: userData?.user_id,
+                    subject: "stream.stop-stream." + chatroomId,
+                    payload: "",
+                  });
                   // setStartVirtualBrowser(false);
                 }}
                 responseIsLoading={streamResponseIsLoading}
@@ -637,7 +618,7 @@ export default function Page() {
               />
             </div>
           </div>
-          <div className="flex justify-center gap-2 mt-2">
+          {/* <div className="flex justify-center gap-2 mt-2">
             <Button
               className="relative w-28 inlin-block bg-blue-500 hover:bg-blue-600"
               onClick={initiateVideoCall}
@@ -655,7 +636,14 @@ export default function Page() {
               <PhoneOff />
               Hang up
             </Button>
-          </div>
+          </div> */}
+          <CallStatusWidget
+            onPlaceCall={initiateVideoCall}
+            onEndCall={stopVideoCall}
+            status={callStatus.status as any}
+            className="flex"
+            isVisible={true}
+          />
         </div>
       </div>
       {!userDataIsLoading && (
@@ -670,95 +658,69 @@ export default function Page() {
   );
 }
 
-const initRTCPeerConnection = async (
-  userId: string,
-  chatroomId: string,
-  socket: WebSocket | null,
-  stream: MediaStream
-) => {
-  if (!socket) {
-    console.error("Socket not initialized");
-    return;
-  }
-  try {
-    // Fetch TURN credentials
-    const response = await fetch(
-      "https://shiba-browser.metered.live/api/v1/turn/credentials?apiKey=01095344344591e468c23ab5e87951baeefc"
-    );
-    const turnServers = await response.json();
-    console.log("TURN Servers", turnServers);
+// const initRTCPeerConnection = async (
+//   userId: string,
+//   chatroomId: string,
+//   socket: WebSocket | null,
+//   stream: MediaStream
+// ) => {
+//   if (!socket) {
+//     console.error("Socket not initialized");
+//     return;
+//   }
+//   try {
+//     // Fetch TURN credentials
+//     const response = await fetch(
+//       "https://shiba-browser.metered.live/api/v1/turn/credentials?apiKey=01095344344591e468c23ab5e87951baeefc"
+//     );
+//     const turnServers = await response.json();
+//     console.log("TURN Servers", turnServers);
 
-    // Create peer connection
-    const peerConnection = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun2.l.google.com:19302" },
-        ...turnServers,
-      ],
-      iceCandidatePoolSize: 10,
-    });
+//     // Create peer connection
+//     const peerConnection = new RTCPeerConnection({
+//       iceServers: [
+//         { urls: "stun:stun.l.google.com:19302" },
+//         { urls: "stun:stun1.l.google.com:19302" },
+//         { urls: "stun:stun2.l.google.com:19302" },
+//         ...turnServers,
+//       ],
+//       iceCandidatePoolSize: 10,
+//     });
 
-    // Set up event handlers
-    peerConnection.onicecandidate = (e) => {
-      if (e.candidate && socket && peerConnection.remoteDescription) {
-        socket.send(
-          JSON.stringify(
-            NewWebrtcMessage(
-              userId,
-              chatroomId,
-              e.candidate.toJSON() as Record<string, unknown>
-            )
-          )
-        );
-      }
-    };
+//     // Set up event handlers
+//     peerConnection.onicecandidate = (e) => {
+//       if (e.candidate && socket && peerConnection.remoteDescription) {
+//         socket.send(
+//           JSON.stringify(
+//             NewWebrtcMessage(
+//               userId,
+//               chatroomId,
+//               e.candidate.toJSON() as Record<string, unknown>
+//             )
+//           )
+//         );
+//       }
+//     };
 
-    // Add local tracks to the connection
-    console.log("STREAM", stream);
-    console.log("Local Tracks", stream.getTracks());
+//     // Add local tracks to the connection
+//     console.log("STREAM", stream);
+//     console.log("Local Tracks", stream.getTracks());
 
-    stream.getTracks().forEach((track) => {
-      peerConnection.addTrack(track, stream);
-    });
+//     stream.getTracks().forEach((track) => {
+//       peerConnection.addTrack(track, stream);
+//     });
 
-    // Create and send offer
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
+//     // Create and send offer
+//     const offer = await peerConnection.createOffer();
+//     await peerConnection.setLocalDescription(offer);
 
-    const sdpMsg = NewWebrtcMessage(userId, chatroomId, offer as any);
-    console.log("Offer:", sdpMsg);
-    socket.send(JSON.stringify(sdpMsg));
+//     const sdpMsg = NewWebrtcMessage(userId, chatroomId, offer as any);
+//     console.log("Offer:", sdpMsg);
+//     socket.send(JSON.stringify(sdpMsg));
 
-    return peerConnection;
-  } catch (error) {
-    console.error("Error in setupPeerConn:", error);
-    return;
-  }
-};
-
-async function getMediaStream() {
-  try {
-    // Try to get both video and audio
-    return await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true,
-    });
-  } catch (err) {
-    console.warn("Failed to get both video and audio:", err);
-    // Try video-only
-    try {
-      return await navigator.mediaDevices.getUserMedia({ video: true });
-    } catch (videoErr) {
-      console.warn("Failed to get video:", videoErr);
-    }
-    // Try audio-only
-    try {
-      return await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (audioErr) {
-      console.warn("Failed to get audio:", audioErr);
-    }
-    // If all fail, return null
-    return null;
-  }
-}
+//     return peerConnection;
+//   } catch (error) {
+//     console.error("Error in setupPeerConn:", error);
+//     return;
+//   }
+// };

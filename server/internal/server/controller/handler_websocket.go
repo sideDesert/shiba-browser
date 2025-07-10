@@ -13,6 +13,41 @@ import (
 	"github.com/pion/ion-sfu/pkg/sfu"
 )
 
+type WsWriter struct {
+	conn *websocket.Conn
+	send chan []byte
+}
+
+func NewWsWriter(conn *websocket.Conn, c *Controller) *WsWriter {
+	ws := &WsWriter{
+		conn: conn,
+		send: make(chan []byte, 256),
+	}
+	go ws.writePump(c)
+	return ws
+}
+
+func (ws *WsWriter) writePump(c *Controller) {
+	log := logger.NewLogger(logger.Console, "writePump")
+	for msg := range ws.send {
+		err := ws.conn.WriteMessage(websocket.TextMessage, msg)
+
+		if err != nil {
+			log.Error("writing WebSocket[chatrooms.sfu.*.*.] Webrtc Message:", err)
+			// Remove connection from cache safely
+			c.mu.Lock()
+			delete(c.conns, ws.conn)
+			c.mu.Unlock()
+			ws.conn.Close()
+			return
+		}
+	}
+}
+
+func (ws *WsWriter) Send(msg []byte) {
+	ws.send <- msg
+}
+
 func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) error {
 	// Extract user ID from request context
 	log := logger.NewLogger(logger.Console, "handleWebsocket")
@@ -50,6 +85,11 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 		return err
 	}
 
+	wsWriter := NewWsWriter(conn, c)
+
+	if c.GetChatroomCtx(chatroomId).HasUser(userId) {
+		c.GetChatroomCtx(chatroomId).RemoveUserAtomic(userId)
+	}
 	c.GetChatroomCtx(chatroomId).AddUser(userId, conn)
 
 	connsVal, err := lib.NewConnMap(userId)
@@ -79,7 +119,7 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 
 		c.mu.Unlock()
 
-		c.GetChatroomCtx(chatroomId).RemoveUser(userId)
+		c.GetChatroomCtx(chatroomId).RemoveUserAtomic(userId)
 
 		if len(c.GetChatroomCtx(chatroomId).Users) == 0 {
 			log.Info("Chatroom will be removed - ", chatroomId)
@@ -88,6 +128,7 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 
 		conn.Close()
 		log.Info("Connection closed with", userTag)
+		log.Info("Total active connections:", len(c.conns))
 	}()
 
 	log.Info("Total active connections:", len(c.conns))
@@ -95,33 +136,22 @@ func (c *Controller) handleWebsocket(w http.ResponseWriter, r *http.Request) err
 	// Subscribe to chat rooms
 	// This is the part of code taking care of SENDING MESSAGES TO ALL PEERS
 
-	c.subscribeToMsgChannels(conn, userId, userChatrooms)
-	c.incomingMessageHandler(conn, userId, chatroomId)
+	c.subscribeToMsgChannels(wsWriter, userId, userChatrooms)
+	c.incomingMessageHandler(wsWriter, userId, chatroomId)
 
 	log.Info("Client Disconnected")
 	return nil
 }
 
-func (c *Controller) subscribeToMsgChannels(conn *websocket.Conn, userId string, userChatrooms []lib.Chatroom) {
+func (c *Controller) subscribeToMsgChannels(ws *WsWriter, userId string, userChatrooms []lib.Chatroom) {
 	log := logger.NewLogger(logger.Console, "natsSubscriptionHandler")
-	currentConn := c.conns[conn]
+	currentConn := c.conns[ws.conn]
 	for _, room := range userChatrooms {
 		chatroomId := room.Id
 		// Chat subscription
 		sub, err := c.msgChannel.Subscribe("chatroom.chat."+chatroomId, func(msg *nats.Msg) {
 			log.Info("Received Message:", string(msg.Data))
-			err := conn.WriteMessage(websocket.TextMessage, msg.Data)
-
-			if err != nil {
-				log.Error("writingWs[chatroom.chat.*]", err)
-				// Remove connection from cache safely
-				c.mu.Lock()
-				delete(c.conns, conn)
-				c.mu.Unlock()
-
-				conn.Close()
-				return
-			}
+			ws.Send(msg.Data)
 		})
 		if err != nil {
 			log.Error("NATSubscription[chatrooms.chat.*]:", err)
@@ -130,8 +160,7 @@ func (c *Controller) subscribeToMsgChannels(conn *websocket.Conn, userId string,
 
 		// Signalling
 		currentConn.Subscriptions = append(currentConn.Subscriptions, sub)
-		sub, err = c.msgChannel.Subscribe("chatroom.signal.*."+chatroomId, func(msg *nats.Msg) {
-			// --CHECK DUPLICITY--
+		sub, err = c.msgChannel.Subscribe("chatrooms.signal.*."+chatroomId, func(msg *nats.Msg) {
 			data := msg.Data
 			var socketMsg lib.SocketMessage[any]
 			err := json.Unmarshal(data, &socketMsg)
@@ -143,25 +172,32 @@ func (c *Controller) subscribeToMsgChannels(conn *websocket.Conn, userId string,
 			}
 
 			log.Info("Received Signal:", string(msg.Data))
-			err = conn.WriteMessage(websocket.TextMessage, msg.Data)
+			ws.Send(msg.Data)
+
+			log.Info("Signal sent to chatroom - ", socketMsg.Subj(), string(msg.Data))
 			if err != nil {
-				log.Error("conn.WriteMessage", err)
+				log.Error("conn.WriteMessage[chatrooms.signal.*.]", err)
+				c.mu.Lock()
+				delete(c.conns, ws.conn)
+				c.mu.Unlock()
+				ws.conn.Close()
+				c.GetChatroomCtx(chatroomId).RemoveUserAtomic(userId)
 				return
 			}
 		})
 
 		if err != nil {
-			log.Error("c.nats.Subscribe(chatroom.signal.*)", err)
+			log.Error("c.nats.Subscribe(chatrooms.signal.*)", err)
 			continue
 		}
 
 		// SFU Signalling
 		// chatrooms.sfu.sdp.server-request.
-		sub, err = c.msgChannel.Subscribe("chatroom.sfu.*.*."+userId, func(msg *nats.Msg) {
+		sub, err = c.msgChannel.Subscribe("chatrooms.sfu.*.*."+userId, func(msg *nats.Msg) {
 			// Do not send the message back to the sender
 			data := msg.Data
 			var socketMsg lib.SocketMessage[any]
-			err := json.Unmarshal(data, socketMsg)
+			err := json.Unmarshal(data, &socketMsg)
 			if err != nil {
 				log.Error("json.Unmarshal", err)
 			}
@@ -169,17 +205,7 @@ func (c *Controller) subscribeToMsgChannels(conn *websocket.Conn, userId string,
 				return
 			}
 
-			err = conn.WriteMessage(websocket.TextMessage, msg.Data)
-			if err != nil {
-				log.Error("writing WebSocket[webrtc.*] Webrtc Message:", err)
-				// Remove connection from cache safely
-				c.mu.Lock()
-				delete(c.conns, conn)
-				c.mu.Unlock()
-
-				conn.Close()
-				return
-			}
+			ws.Send(msg.Data)
 		})
 		if err != nil {
 			log.Error("Error subscribing to NATS[webrtc.*]:", err)
@@ -189,11 +215,11 @@ func (c *Controller) subscribeToMsgChannels(conn *websocket.Conn, userId string,
 	}
 }
 
-func (c *Controller) incomingMessageHandler(conn *websocket.Conn, userId string, chatroomId string) {
-	log := logger.NewLogger(logger.Console, "ListenMessageHandler")
+func (c *Controller) incomingMessageHandler(ws *WsWriter, userId string, chatroomId string) {
+	log := logger.NewLogger(logger.Console, "incomingMessageHandler")
 
 	for {
-		_, msg, err := conn.ReadMessage()
+		_, msg, err := ws.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				log.Error("Unexpected WS Close:", err)
@@ -212,12 +238,12 @@ func (c *Controller) incomingMessageHandler(conn *websocket.Conn, userId string,
 		parsedMsg, err := socketMsg.Parse()
 
 		switch v := parsedMsg.(type) {
-		case lib.ChatMessage:
+		case *lib.ChatMessage:
 			c.handleSocketChatMessage(v)
 
 		// SFU Messages are not really supposed to be sent from the client to the server
-		case lib.SFUSdpMessage:
-		case lib.SFUIceMessage:
+		case *lib.SFUSdpMessage:
+		case *lib.SFUIceMessage:
 			payload := v.Payload
 			trickleType := payload.Type
 			if trickleType != "pub" && trickleType != "sub" {
@@ -240,27 +266,32 @@ func (c *Controller) incomingMessageHandler(conn *websocket.Conn, userId string,
 				}
 			}
 
-		case lib.SFUSdpReqmessage:
+		case *lib.SFUSdpReqmessage:
 
 		// init-ic (indiv call)
-		case lib.Signal0Message:
-			c.msgChannel.Publish(&v)
+		case *lib.Signal0Message:
+			err := c.msgChannel.Publish(v)
+			if err != nil {
+				log.Error("Signal0Message.msgChannel.Publish", err)
+				continue
+			}
+			log.Info("Published Signal-0 to subject - ", v.Subject)
 
 		// init-gc (goup call)
-		case lib.Signal1Message:
+		case *lib.Signal1Message:
 			c.GetChatroomCtx(chatroomId).SetOnCall(true)
-			err := c.msgChannel.Publish(&v)
+			err := c.msgChannel.Publish(v)
 			if err != nil {
 				log.Error("Signal1Message.msgChannel.Publish", err)
 				continue
 			}
 			peerA := sfu.NewPeer(c.sfu)
-			SetupPeer(peerA, c.msgChannel, userId)
 			err = peerA.Join(chatroomId, userId)
 			if err != nil {
 				log.Error("Signal1Message.peerA.Join", err)
 				continue
 			}
+			SetupPeer(peerA, c.msgChannel, userId)
 			payload := v.Payload
 			answer, err := peerA.Answer(payload.Sdp)
 			sfuPayload := lib.SdpPayload{
@@ -279,39 +310,35 @@ func (c *Controller) incomingMessageHandler(conn *websocket.Conn, userId string,
 			}
 
 		// ans-ic (answer call)
-		case lib.Signal2Message:
-			if err := c.AnsIcMsgHandler(v, chatroomId, userId); err != nil {
+		case *lib.Signal2Message:
+			if err := c.AnsIcMsgHandler(*v, chatroomId, userId); err != nil {
 				log.Error("AnsIcMsgHandler", err)
 				continue
 			}
 
 		// ack-ic (ack individual call)
-		case lib.Signal11Message:
-			if err = c.AckMsgHandler(v, chatroomId, userId); err != nil {
+		case *lib.Signal11Message:
+			if err = c.AckMsgHandler(*v, chatroomId, userId); err != nil {
 				log.Error("AckIcMsgHandler", err)
 				continue
 			}
 
 		// end-call (end call)
-		case lib.Signal3Message:
+		case *lib.Signal3Message:
 			// Move to asynch cleaner (sort of like a garbage collector)
-			c.GetChatroomCtx(chatroomId).SetOnCall(false)
-			for k, p := range c.GetChatroomCtx(chatroomId).CallParticipants {
-				p.Close()
-				delete(c.GetChatroomCtx(chatroomId).CallParticipants, k)
-			}
+			c.GetChatroomCtx(chatroomId).EndVideoCall()
 
 		// ans-gc (answer group call)
-		case lib.Signal4Message:
+		case *lib.Signal4Message:
 			if v.Payload.Answer == "join" {
 				sdp := v.Payload.Sdp
 				peerB := sfu.NewPeer(c.sfu)
-				SetupPeer(peerB, c.msgChannel, userId)
 				err := peerB.Join(chatroomId, userId)
 				if err != nil {
 					log.Error("peerB.Join", err)
 					continue
 				}
+				SetupPeer(peerB, c.msgChannel, userId)
 				answer, err := peerB.Answer(sdp)
 				if err != nil {
 					log.Error("peerB.Answer", err)
@@ -339,23 +366,25 @@ func (c *Controller) incomingMessageHandler(conn *websocket.Conn, userId string,
 			}
 
 		// start-stream (start stream)
-		case lib.Signal5Message:
+		case *lib.Signal5Message:
 
 		// join-stream (join stream)
-		case lib.Signal7Message:
+		case *lib.Signal7Message:
 
 		// leave-stream (leave stream)
-		case lib.Signal8Message:
+		case *lib.Signal8Message:
 
 		// end-stream (end stream)
-		case lib.Signal9Message:
+		case *lib.Signal9Message:
 
 		// remote (remote action)
-		case lib.Signal10Message:
+		case *lib.Signal10Message:
+		default:
+			log.Warning("No Concrete type for message could be determined :/")
 		}
 
 		if err != nil {
-			log.Error("socketMsg.Parse", "Could not parse socket message", err)
+			log.Error("socketMsg.Parse", "Could not parse socket message ", err)
 			continue
 		}
 

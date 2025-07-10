@@ -144,15 +144,15 @@ var SignalSubject = []string{
 }
 
 var SignalMessageTypes = map[string]func() interface{}{
-	Signal0:  func() interface{} { return &Signal0Message{} },
-	Signal1:  func() interface{} { return &Signal1Message{} },
-	Signal2:  func() interface{} { return &Signal2Message{} },
-	Signal3:  func() interface{} { return &Signal3Message{} },
-	Signal4:  func() interface{} { return &Signal4Message{} },
-	Signal5:  func() interface{} { return &Signal5Message{} },
-	Signal7:  func() interface{} { return &Signal7Message{} },
-	Signal8:  func() interface{} { return &Signal8Message{} },
-	Signal9:  func() interface{} { return &Signal9Message{} },
-	Signal10: func() interface{} { return &Signal10Message{} },
-	Signal11: func() interface{} { return &Signal11Message{} },
+	Signal0:  func() any { return &Signal0Message{} },
+	Signal1:  func() any { return &Signal1Message{} },
+	Signal2:  func() any { return &Signal2Message{} },
+	Signal3:  func() any { return &Signal3Message{} },
+	Signal4:  func() any { return &Signal4Message{} },
+	Signal5:  func() any { return &Signal5Message{} },
+	Signal7:  func() any { return &Signal7Message{} },
+	Signal8:  func() any { return &Signal8Message{} },
+	Signal9:  func() any { return &Signal9Message{} },
+	Signal10: func() any { return &Signal10Message{} },
+	Signal11: func() any { return &Signal11Message{} },
 }

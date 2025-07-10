@@ -44,10 +44,10 @@ type Controller struct {
 func (c *Controller) GetChatroomCtx(chatroomId string) *ChatroomCtx {
 	c.mu.Lock()
 	a, ok := c.chatroomCtxMap[chatroomId]
-
 	if !ok {
 		chatroomCtx := c.NewChatroomCtx(context.Background(), chatroomId, -1)
 		c.chatroomCtxMap[chatroomId] = chatroomCtx
+		a = c.chatroomCtxMap[chatroomId]
 	}
 	c.mu.Unlock()
 	return a

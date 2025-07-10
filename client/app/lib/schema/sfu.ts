@@ -1,5 +1,10 @@
 import { type SocketMessage } from "./message";
 
+export const SfuType = {
+  ice: "ice",
+  sdp: "sdp",
+} as const;
+
 export const SfuSignal = {
   serverAnswer: "server-answer",
   serverOffer: "server-offer",
@@ -7,6 +12,7 @@ export const SfuSignal = {
   serverTrickle: "server-trickle",
   ClientTrickle: "client-trickle",
 } as const;
+
 //_type => server-answer, server-offer, sever-request
 const iceSubject = "chatrooms.sfu.ice.<sigcode>.<uid>";
 const sdpSubject = "chatrooms.sfu.sdp.<sigcode>.<uid>";

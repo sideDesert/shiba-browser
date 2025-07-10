@@ -2,9 +2,11 @@ package controller
 
 import (
 	"context"
+	"sideDesert/shiba/internal/logger"
 	"sideDesert/shiba/internal/vbrowser"
 	vb "sideDesert/shiba/internal/vbrowser"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/ion-sfu/pkg/sfu"
@@ -72,20 +74,58 @@ func (c *ChatroomCtx) AddUser(userId string, conn *websocket.Conn) {
 
 func (c *ChatroomCtx) AddCallParticipant(userId string, peer *sfu.PeerLocal) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if oldPeer, ok := c.CallParticipants[userId]; ok {
+		logger.NewLogger(logger.Console, "AddCallParticipant").Info("Closing old SFU peer for user", userId)
+		oldPeer.Close()
+		delete(c.CallParticipants, userId)
+	}
+	logger.NewLogger(logger.Console, "AddCallParticipant").Info("Adding new SFU peer for user", userId)
 	c.CallParticipants[userId] = peer
+}
+
+func (c *ChatroomCtx) EndVideoCall() {
+	c.mu.Lock()
+	c.SetOnCall(false)
 	c.mu.Unlock()
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for k, p := range c.CallParticipants {
+			p.Close()
+			delete(c.CallParticipants, k)
+		}
+	}()
 }
 
 func (c *ChatroomCtx) RemoveCallParticipant(userId string) {
 	c.mu.Lock()
-	c.CallParticipants[userId].Close()
+	peer := c.CallParticipants[userId]
+	if peer.Subscriber() != nil {
+		peer.Subscriber().Close()
+	}
+	if peer.Publisher() != nil {
+		peer.Publisher().Close()
+	}
+	peer.Close()
 	delete(c.CallParticipants, userId)
 	c.mu.Unlock()
 }
-func (c *ChatroomCtx) RemoveUser(userId string) {
-	c.mu.Lock()
-	delete(c.Users, userId)
-	c.mu.Unlock()
+
+func (ctx *ChatroomCtx) RemoveUserAtomic(userId string) {
+	ctx.mu.Lock()
+	if conn, ok := ctx.Users[userId]; ok {
+		conn.Close()
+		delete(ctx.Users, userId)
+	}
+	ctx.mu.Unlock()
+}
+
+func (ctx *ChatroomCtx) HasUser(userId string) bool {
+	_, ok := ctx.Users[userId]
+	return ok
 }
 
 func (c *ChatroomCtx) _removeCallParticipant(userId string) {

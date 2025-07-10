@@ -61,3 +61,29 @@ export async function patch<T extends object>(endpoint: string, body: T) {
     return err;
   }
 }
+
+export async function getMediaStream() {
+  try {
+    // Try to get both video and audio
+    return await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
+  } catch (err) {
+    console.warn("Failed to get both video and audio:", err);
+    // Try video-only
+    try {
+      return await navigator.mediaDevices.getUserMedia({ video: true });
+    } catch (videoErr) {
+      console.warn("Failed to get video:", videoErr);
+    }
+    // Try audio-only
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (audioErr) {
+      console.warn("Failed to get audio:", audioErr);
+    }
+    // If all fail, return null
+    return null;
+  }
+}

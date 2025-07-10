@@ -10,6 +10,15 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
+const MESSAGE_PREFIX = "chatrooms"
+const TYPE_CHAT = "chat"
+const TYPE_SIGNAL = "signal"
+const TYPE_SFU = "sfu"
+const CHAT_PREFIX = MESSAGE_PREFIX + "." + TYPE_CHAT
+const SIGNAL_PREFIX = MESSAGE_PREFIX + "." + TYPE_SIGNAL
+const SFU_ICE_PREFIX = MESSAGE_PREFIX + "." + TYPE_SFU + ".ice"
+const SFU_SDP_PREFIX = MESSAGE_PREFIX + "." + TYPE_SFU + ".sdp"
+
 type ApiError struct {
 	Error string `json:"error"`
 }
@@ -36,14 +45,14 @@ func (msg *SocketMessage[any]) Parse() (interface{}, error) {
 	}
 
 	switch {
-	case strings.HasPrefix(msg.Subject, "chatroom.chat"):
+	case strings.HasPrefix(msg.Subject, CHAT_PREFIX):
 		var chatMsg ChatMessage
 		if err := json.Unmarshal(payloadBytes, &chatMsg); err != nil {
 			return nil, fmt.Errorf("unmarshal ChatMessage: %w", err)
 		}
-		return chatMsg, nil
+		return &chatMsg, nil
 
-	case strings.HasPrefix(msg.Subject, "chatroom.signal"):
+	case strings.HasPrefix(msg.Subject, SIGNAL_PREFIX):
 		parts := strings.Split(msg.Subject, ".")
 		if len(parts) < 3 {
 			return nil, fmt.Errorf("invalid signal subject: %s", msg.Subject)
@@ -61,7 +70,7 @@ func (msg *SocketMessage[any]) Parse() (interface{}, error) {
 		}
 		return instance, nil
 
-	case strings.HasPrefix(msg.Subject, "chatroom.sfu.ice"):
+	case strings.HasPrefix(msg.Subject, SFU_ICE_PREFIX):
 		var sfuMsg SFUIceMessage
 		if err := json.Unmarshal(payloadBytes, &sfuMsg); err != nil {
 			return nil, fmt.Errorf("unmarshal SFUIceMessage: %w", err)
@@ -69,9 +78,9 @@ func (msg *SocketMessage[any]) Parse() (interface{}, error) {
 		if sfuMsg.Payload.Type != "pub" && sfuMsg.Payload.Type != "sub" {
 			return nil, fmt.Errorf("sfuMsg type is invalid")
 		}
-		return sfuMsg, nil
+		return &sfuMsg, nil
 
-	case strings.HasPrefix(msg.Subject, "chatroom.sfu.sdp"):
+	case strings.HasPrefix(msg.Subject, SFU_SDP_PREFIX):
 		var sfuMsg SFUSdpMessage
 		if err := json.Unmarshal(payloadBytes, &sfuMsg); err != nil {
 			return nil, fmt.Errorf("unmarshal SFUSdpMessage: %w", err)
@@ -79,7 +88,7 @@ func (msg *SocketMessage[any]) Parse() (interface{}, error) {
 		if sfuMsg.Payload.Type != "pub" && sfuMsg.Payload.Type != "sub" {
 			return nil, fmt.Errorf("sfuMsg type is invalid")
 		}
-		return sfuMsg, nil
+		return &sfuMsg, nil
 
 	default:
 		return nil, fmt.Errorf("unknown subject: %s", msg.Subject)

@@ -26,7 +26,7 @@ export const subject2 = prefix + signal2;
 export type Signal2Payload = {
   answer: "accept" | "decline";
   caller_id: string;
-  sdp: RTCSessionDescriptionInit;
+  sdp?: RTCSessionDescriptionInit;
 };
 export type Signal2Message = SocketMessage<Signal2Payload>;
 

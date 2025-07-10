@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"errors"
 	"sideDesert/shiba/internal/logger"
 	"sideDesert/shiba/internal/server/lib"
+	"strings"
 
 	"github.com/pion/ion-sfu/pkg/sfu"
 	"github.com/pion/webrtc/v3"
@@ -28,6 +30,9 @@ func SetupPeer(peer *sfu.PeerLocal, msgChannel *MsgChannel, userId string) {
 	}
 
 	peer.Publisher().OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
 		sfuPayload := lib.IcePayload{
 			Type:    "pub",
 			Trickle: candidate.ToJSON(),
@@ -41,6 +46,9 @@ func SetupPeer(peer *sfu.PeerLocal, msgChannel *MsgChannel, userId string) {
 	})
 
 	peer.Subscriber().OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
 		sfuPayload := lib.IcePayload{
 			Type:    "sub",
 			Trickle: candidate.ToJSON(),
@@ -58,10 +66,17 @@ func SetupPeer(peer *sfu.PeerLocal, msgChannel *MsgChannel, userId string) {
 func (c *Controller) AckMsgHandler(v lib.Signal11Message, chatroomId string, userId string) error {
 	log := logger.NewLogger(logger.Console, "AckMsgHandler")
 	sdp := v.Payload.Sdp
+	if !strings.Contains(sdp.SDP, "m=video") {
+		log.Error("SDP does not contain a video m-line, rejecting")
+		return errors.New("invalid SDP: no video")
+	}
 	peerA := sfu.NewPeer(c.sfu)
 	// For the subscriber
+	err := peerA.Join(chatroomId, userId)
+	if err != nil {
+		log.Error("peerA.join", err)
+	}
 	SetupPeer(peerA, c.msgChannel, userId)
-	peerA.Join(chatroomId, userId)
 	answer, err := peerA.Answer(sdp)
 	if err != nil {
 		log.Error("peerA.Answer", err)
@@ -95,9 +110,16 @@ func (c *Controller) AnsIcMsgHandler(v lib.Signal2Message, chatroomId string, us
 	if payload.Answer == "accept" {
 		callerId := payload.CallerId
 		sdp := payload.Sdp
+		if !strings.Contains(sdp.SDP, "m=video") {
+			log.Error("SDP does not contain a video m-line, rejecting")
+			return errors.New("invalid SDP: no video")
+		}
 		peerB := sfu.NewPeer(c.sfu)
+		err := peerB.Join(chatroomId, userId)
+		if err != nil {
+			log.Error("peerB.Join", err)
+		}
 		SetupPeer(peerB, c.msgChannel, userId)
-		peerB.Join(chatroomId, userId)
 		answer, err := peerB.Answer(sdp)
 		if err != nil {
 			log.Error("peerB.Answer", err)
@@ -128,120 +150,3 @@ func (c *Controller) AnsIcMsgHandler(v lib.Signal2Message, chatroomId string, us
 	}
 	return nil
 }
-
-// This is the old version of stopping stream
-// if msgType == "stop-stream" {
-// 	log.Info("Stopping Stream")
-
-// 	err := browserManager.Pipeline.SetState(gst.StateNull)
-// 	if err != nil {
-// 		log.Error("Error stopping stream[Pipeline.SetState(gst.StateNull)]", err)
-// 	}
-
-// 	userIds, err := c.s.Store.GetUsersByChatroomId(c.s.Ctx, chatroomId)
-// 	if err != nil {
-// 		log.Error("Error getting users by chatroom id:", err)
-// 	}
-
-// 	c.mu.Lock()
-// 	for _, conn := range c.conns {
-// 		if lib.Contains(userIds, conn.UserId) {
-// 			conn.StreamConfig.PeerConnection.Close()
-// 		}
-// 	}
-// 	c.mu.Unlock()
-
-// 	c.chatroomCtx[chatroomId].cancel()
-// 	delete(c.chatroomCtx, chatroomId)
-// 	log.Info("Stream Ended")
-// 	break
-// }
-
-/* */
-
-// if strings.HasPrefix(socketMsg.Subject, "") {
-// 			// The message form will be - stream.[type].[chatroomId]
-// 			// DEBUG
-// 			// log.Info("Message received in stream socket subject")
-
-// 			sp := strings.Split(socketMsg.Subject, ".")
-// 			if len(sp) != 3 {
-// 				log.Error("Error in msg[subject] length:(not 3)")
-// 				continue
-// 			}
-// 			msgType := sp[1]
-// 			chatroomId := sp[2]
-// 			userId := socketMsg.Sender
-// 			if userId == "" {
-// 				log.Error("No senderId provided in message")
-// 				log.Error("Sender", string(msg))
-// 				continue
-// 			}
-
-// 			if msgType == "answer" {
-// 				payloadMap, ok := socketMsg.Payload.(map[string]any)
-// 				if !ok {
-// 					log.Error("Payload is not a valid map[string]interface{}")
-// 					continue
-// 				}
-
-// 				jsonBytes, err := json.Marshal(payloadMap)
-// 				if err != nil {
-// 					log.Error("Failed to marshal payload map to JSON:", err)
-// 					continue
-// 				}
-
-// 				var desc webrtc.SessionDescription
-// 				err = json.Unmarshal(jsonBytes, &desc)
-// 				if err != nil {
-// 					log.Error("Failed to unmarshal JSON to SessionDescription:", err)
-// 					continue
-// 				}
-
-// 				c.mu.Lock()
-// 				connVal, ok := c.conns[conn]
-// 				c.mu.Unlock()
-// 				if !ok {
-// 					log.Error("Error: reading connVal c.conns[conn]:")
-// 					continue
-// 				}
-// 				err = connVal.StreamConfig.PeerConnection.SetRemoteDescription(desc)
-// 				if err != nil {
-// 					log.Error("Error setting remote description:", err)
-// 					continue
-// 				}
-// 				log.Info("Remote description set for", userId, ":", chatroomId)
-// 				log.Info("Webrtc Connection Established with", userId, ":", chatroomId)
-// 			}
-// 			if msgType == "ice" {
-// 				payloadMap, ok := socketMsg.Payload.(map[string]any)
-// 				if !ok {
-// 					log.Error("Ice Candidate payload is not of type map[string]any")
-// 					continue
-// 				}
-
-// 				jsonBytes, err := json.Marshal(payloadMap)
-// 				if err != nil {
-// 					log.Error("Failed to marshal payload map to JSON:", err)
-// 					continue
-// 				}
-
-// 				var _candidate webrtc.ICECandidateInit
-// 				err = json.Unmarshal(jsonBytes, &_candidate)
-// 				if err != nil {
-// 					log.Error("Failed to unmarshal JSON to ICECandidateInit:", err)
-// 					continue
-// 				}
-
-// 				c.mu.Lock()
-// 				c.conns[conn].StreamConfig.PeerConnection.AddICECandidate(_candidate)
-// 				c.mu.Unlock()
-// 				// log.Info("ICE candidate added for", userId, ":", chatroomId)
-// 			}
-
-// 			if msgType == "disconnected" {
-// 				log.Info("User", userId, "disconnected from", chatroomId)
-// 				break
-// 			}
-
-// 		}

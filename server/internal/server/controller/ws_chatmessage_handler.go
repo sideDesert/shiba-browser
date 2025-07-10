@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func (c *Controller) handleSocketChatMessage(msg lib.ChatMessage) {
+func (c *Controller) handleSocketChatMessage(msg *lib.ChatMessage) {
 	s := strings.Split(msg.Subject, ".")
 	log := logger.NewLogger(logger.Console, "handleSocketChatMessage")
 
@@ -16,7 +16,7 @@ func (c *Controller) handleSocketChatMessage(msg lib.ChatMessage) {
 	}
 
 	chatroomId := s[2]
-	c.msgChannel.Publish(&msg)
+	c.msgChannel.Publish(msg)
 
 	if err := c.s.StoreChatMessage(msg.Sender, chatroomId, msg.Payload); err != nil {
 		log.Error("Error storing chat message:", err)

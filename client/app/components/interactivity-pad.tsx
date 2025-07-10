@@ -13,7 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { forwardRef } from "react";
 import { Switch } from "./ui/switch";
 import { CursorValue, NewCursorPayload } from "@/lib/types";
-import { NewRemoteMessage } from "@/lib/chat";
+import type { ShibaMessageManager } from "@/lib/socket-message-manager.ts/main";
 
 export function useMouse() {
   const mouse = useRef({ x: 0, y: 0 });
@@ -66,7 +66,7 @@ export function useMouseClick(ref: RefObject<any>) {
 }
 
 type InteractivityPadProps = {
-  socket: WebSocket | null;
+  socket: ShibaMessageManager | null;
   handleStartStream: () => void;
   handleStopStream: () => void;
   responseIsLoading: boolean;
@@ -277,7 +277,7 @@ function CursorPositionTag({
   chatroomId,
   isStreaming,
 }: {
-  socket: WebSocket | null;
+  socket: ShibaMessageManager | null;
   userId: string;
   chatroomId: string;
   isStreaming: boolean;
@@ -392,8 +392,8 @@ function CursorPositionTag({
 
       console.log({ x, y });
       const payload = NewCursorPayload(x, y, CursorValue.LeftClick);
-      const message = NewRemoteMessage(userId, chatroomId, payload);
-      console.log(message);
+      // const message = NewRemoteMessage(userId, chatroomId, payload);
+      // console.log(message);
       // socket?.send(JSON.stringify(message))
     }
 

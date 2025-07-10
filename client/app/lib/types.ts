@@ -13,25 +13,9 @@ export const UserChatroomSchema = z.object({
 
 export type UserChatroom = z.infer<typeof UserChatroomSchema>;
 
-export type Message<T> = {
-  // Subject can we - chatroom.chat.<cid>, chatroom.sfu.<cid>, chatroom.signal.<cid>
-  subject: string;
-  // Sender is always userId
+export type ClientChatMessage = {
   sender: string;
-  // Payload depends on different type of messages
-  payload: T;
-};
-
-export type ChatMessage = {
   chatroom_id: string;
-  sender: string;
-  id: string;
-  sender_name: string;
-  content: string;
-  created_at: string;
-};
-
-export type ChatMessagePayload = {
   id: string;
   sender_name: string;
   content: string;
